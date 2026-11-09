@@ -60,12 +60,12 @@ export function applyBlocks(text: string, blocks: Block[]): string {
       level = n.children
     }
     // Commands with leading spaces are children of the previous command in this block (e.g. ACL entries).
-    let lastTop: Node | null = null
+    let lastTop = null as Node | null
     for (const rawCmd of b.cmds) {
       const nested = /^\s+/.test(rawCmd)
       const cmd = asShown(rawCmd.trim())
       if (!cmd || cmd.startsWith('!')) continue
-      const target = nested && lastTop ? lastTop.children : level
+      const target: Node[] = nested && lastTop ? lastTop.children : level
       const insert = (n: Node) => { if (target === root) root.splice(endIdx(), 0, n); else target.push(n) }
       if (cmd.startsWith('no ') && !nested) {
         const what = cmd.slice(3)
@@ -78,7 +78,7 @@ export function applyBlocks(text: string, blocks: Block[]): string {
       const noIdx = target.findIndex(x => x.text === `no ${cmd}`)
       if (noIdx >= 0) target.splice(noIdx, 1)
       const k = keyOf(cmd)
-      const existing = target.find(x => x.text === cmd) ?? (k ? target.find(x => keyOf(x.text) === k) : undefined)
+      const existing: Node | undefined = target.find(x => x.text === cmd) ?? (k ? target.find(x => keyOf(x.text) === k) : undefined)
       if (existing) { existing.text = cmd; lastTop = existing; continue }
       const n: Node = { text: cmd, children: [] }
       insert(n)

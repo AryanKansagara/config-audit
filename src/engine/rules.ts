@@ -342,18 +342,18 @@ export const RULES: Rule[] = [
         return /^(RO|RW|ro|rw)$/.test(last) || t.length <= 3 || /^view$/.test(t[t.length - 2])
       })
       if (!hits.length) return []
-      return hits.map(l => ({ target: `snmp community line ${l.n}`, line: l.n, detail: `"${l.text}" has no ACL.`, fix: snmpFix(c, s, l) }))
+      return hits.map(l => ({ target: l.text, line: l.n, detail: `"${l.text}" has no ACL.`, fix: snmpFix(c, s, l) }))
     },
   },
   {
     id: 'SNMP-02', title: 'No read-write SNMP communities', severity: 'high', category: 'SNMP', ref: 'CIS 1.5 SNMP rules', platforms: ['ios', 'iosxe', 'nxos'],
     rationale: 'An RW community lets anyone who learns it rewrite configuration or reload the device.',
-    check: ({ c, s }) => find(c, /^snmp-server community \S+ .*\b(RW|rw)\b|^snmp-server community \S+ group network-admin/).map(l => ({ target: `snmp community line ${l.n}`, line: l.n, detail: 'Read-write SNMP community. Use SNMPv3 authPriv for any write access.', fix: snmpFix(c, s, l) })),
+    check: ({ c, s }) => find(c, /^snmp-server community \S+ .*\b(RW|rw)\b|^snmp-server community \S+ group network-admin/).map(l => ({ target: l.text, line: l.n, detail: 'Read-write SNMP community. Use SNMPv3 authPriv for any write access.', fix: snmpFix(c, s, l) })),
   },
   {
     id: 'SNMP-03', title: 'No default or guessable communities', severity: 'critical', category: 'SNMP', ref: 'CIS 1.5 SNMP rules', platforms: ['ios', 'iosxe', 'nxos', 'asa'],
     rationale: '"public", "private" and short dictionary words are the first strings every scanner tries.',
-    check: ({ c, s }) => find(c, /^snmp-server (community|host) .*<masked:weak>/).map(l => ({ target: `snmp community line ${l.n}`, line: l.n, detail: 'Default, short or dictionary community string (value masked on import).', fix: l.text.startsWith('snmp-server community') ? snmpFix(c, s, l) : { apply: [{ parents: [], cmds: [`no ${l.text}`, l.text.replace('<masked:weak>', '<NEW-LONG-RANDOM-COMMUNITY>')] }], rollback: [{ parents: [], cmds: ['! re-enter the old trap community manually'] }], order: 1 } })),
+    check: ({ c, s }) => find(c, /^snmp-server (community|host) .*<masked:weak>/).map(l => ({ target: l.text, line: l.n, detail: 'Default, short or dictionary community string (value masked on import).', fix: l.text.startsWith('snmp-server community') ? snmpFix(c, s, l) : { apply: [{ parents: [], cmds: [`no ${l.text}`, l.text.replace('<masked:weak>', '<NEW-LONG-RANDOM-COMMUNITY>')] }], rollback: [{ parents: [], cmds: ['! re-enter the old trap community manually'] }], order: 1 } })),
   },
   {
     id: 'SNMP-04', title: 'SNMPv3 with authentication and privacy', severity: 'medium', category: 'SNMP', ref: 'CIS 1.5 SNMP rules / STIG SNMPv3', platforms: ['ios', 'iosxe', 'asa'],
@@ -553,17 +553,17 @@ export const RULES: Rule[] = [
   {
     id: 'ACL-01', title: 'No permit any any', severity: 'high', category: 'ACLs', ref: 'CIS 3.2 Border router filtering', platforms: ['ios', 'iosxe', 'nxos', 'asa'],
     rationale: 'A "permit ip any any" entry makes everything after it dead and usually defeats the ACL\'s purpose.',
-    check: ({ aclIssues, c }) => aclIssues.filter(x => x.kind === 'any-any').map(x => ({ target: `${x.acl} line ${x.line}`, line: x.line, detail: `${x.acl}: ${x.detail}`, fix: aclRemove(c, x) })),
+    check: ({ aclIssues, c }) => aclIssues.filter(x => x.kind === 'any-any').map(x => ({ target: `${x.acl}: ${x.text}`, line: x.line, detail: `${x.acl}: ${x.detail}`, fix: aclRemove(c, x) })),
   },
   {
     id: 'ACL-02', title: 'No shadowed ACEs', severity: 'medium', category: 'ACLs', ref: 'ACL hygiene', platforms: ['ios', 'iosxe', 'nxos', 'asa'],
     rationale: 'A shadowed entry never matches because earlier entries with the opposite action already decide its traffic. The intent of that entry is not being enforced.',
-    check: ({ aclIssues, c }) => aclIssues.filter(x => x.kind === 'shadowed').map(x => ({ target: `${x.acl} line ${x.line}`, line: x.line, detail: `${x.acl}: "${x.text}". ${x.detail}`, fix: { ...aclRemove(c, x), note: 'Decide the intent: if this entry should win, move it above the covering entries instead of deleting it.' } })),
+    check: ({ aclIssues, c }) => aclIssues.filter(x => x.kind === 'shadowed').map(x => ({ target: `${x.acl}: ${x.text}`, line: x.line, detail: `${x.acl}: "${x.text}". ${x.detail}`, fix: { ...aclRemove(c, x), note: 'Decide the intent: if this entry should win, move it above the covering entries instead of deleting it.' } })),
   },
   {
     id: 'ACL-03', title: 'No redundant ACEs', severity: 'low', category: 'ACLs', ref: 'ACL hygiene', platforms: ['ios', 'iosxe', 'nxos', 'asa'],
     rationale: 'Redundant entries add TCAM usage and review noise without changing behavior.',
-    check: ({ aclIssues, c }) => aclIssues.filter(x => x.kind === 'redundant').map(x => ({ target: `${x.acl} line ${x.line}`, line: x.line, detail: `${x.acl}: "${x.text}". ${x.detail}`, fix: aclRemove(c, x) })),
+    check: ({ aclIssues, c }) => aclIssues.filter(x => x.kind === 'redundant').map(x => ({ target: `${x.acl}: ${x.text}`, line: x.line, detail: `${x.acl}: "${x.text}". ${x.detail}`, fix: aclRemove(c, x) })),
   },
   {
     id: 'ACL-04', title: 'Applied ACLs exist', severity: 'high', category: 'ACLs', ref: 'ACL hygiene', platforms: ['ios', 'iosxe', 'nxos', 'asa'],

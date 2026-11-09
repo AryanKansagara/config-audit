@@ -114,7 +114,7 @@ export function FindingRow({ f, open, onToggle, project, update, showHost = true
     <li className={`finding${open ? ' open' : ''}${f.waived ? ' waived' : ''}`}>
       <button type="button" className="finding-head" aria-expanded={open} onClick={onToggle}>
         <Sev s={f.severity} />
-        <span className="finding-title"><strong>{f.title}</strong><small>{showHost && <>{f.host} · </>}{f.target === 'global' ? 'global config' : f.target}{f.line ? ` · line ${f.line}` : ''}</small></span>
+        <span className="finding-title"><strong>{f.title}</strong><small>{showHost && <>{f.host} · </>}{f.target === 'global' ? 'global config' : f.target}{f.line && !/ line \d+$/.test(f.target) ? ` · line ${f.line}` : ''}</small></span>
         {f.waived && <span className="badge">Waived to {f.waived.expires}</span>}
         {lapsed && <span className="badge warn">Waiver expired {lapsed.expires}</span>}
         <span className="mono small muted">{f.rule}</span>

@@ -53,7 +53,7 @@ export function SevBar({ counts }: { counts: Record<Severity, number> }) {
 
 export const sevCounts = (fs: Finding[]) => Object.fromEntries(SEV_ORDER.map(s => [s, fs.filter(f => f.severity === s && !f.waived).length])) as Record<Severity, number>
 
-interface ViewLine { n: number; text: string; indent: number; top: number; hasKids: boolean }
+interface ViewLine { n: number; text: string; indent: number; top: number; hasKids: boolean; banner?: boolean }
 
 /**
  * Config tree viewer. Lines with findings light up (worst severity wins); their top-level parent
@@ -72,12 +72,16 @@ export function ConfigView({ text, findings, selected, onSelect, added, maxHeigh
   const lines = useMemo<ViewLine[]>(() => {
     const raw = text.split('\n')
     let top = 0
+    let delim: string | null = null
     const out = raw.map((t, i) => {
+      if (delim !== null) { const end = t.includes(delim); if (end) delim = null; return { n: i + 1, text: t, indent: 1, top, hasKids: false, banner: true } }
+      const b = t.match(/^banner \S+ (\^C|.)(.*)$/)
+      if (b && !b[2].includes(b[1])) delim = b[1]
       const indent = t.length - t.trimStart().length
       if (indent === 0 && t.trim() && !t.startsWith('!')) top = i + 1
       return { n: i + 1, text: t, indent, top: indent === 0 ? i + 1 : top, hasKids: false }
     })
-    for (let i = 0; i < out.length - 1; i++) if (out[i].indent === 0 && out[i + 1].indent > 0 && out[i + 1].text.trim()) out[i].hasKids = true
+    for (let i = 0; i < out.length - 1; i++) if (out[i].indent === 0 && !out[i].banner && out[i + 1].indent > 0 && out[i + 1].text.trim()) out[i].hasKids = true
     return out
   }, [text])
   const byLine = useMemo(() => {
@@ -104,6 +108,12 @@ export function ConfigView({ text, findings, selected, onSelect, added, maxHeigh
     const el = box.current.querySelector<HTMLElement>(`[data-n="${selLine}"]`)
     if (el) box.current.scrollTo({ top: el.offsetTop - box.current.clientHeight / 3, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
   }, [selLine])
+  useEffect(() => {
+    const first = added && Math.min(...added)
+    if (!first || !Number.isFinite(first) || !box.current) return
+    const el = box.current.querySelector<HTMLElement>(`[data-n="${first}"]`)
+    if (el) box.current.scrollTo({ top: el.offsetTop - 40, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  }, [added])
 
   return (
     <div className="cfg" ref={box} style={{ maxHeight }} role="region" aria-label="Configuration">
@@ -116,14 +126,14 @@ export function ConfigView({ text, findings, selected, onSelect, added, maxHeigh
           const isSel = !!fs?.some(f => f.key === selected)
           const comment = l.text.trimStart().startsWith('!')
           return (
-            <li key={l.n} data-n={l.n} className={[worst && `hit hit-${worst}`, isSel && 'sel', added?.has(l.n) && 'added', comment && 'cmt'].filter(Boolean).join(' ')}>
+            <li key={l.n} data-n={l.n} className={[worst && `hit hit-${worst}`, isSel && 'sel', added?.has(l.n) && 'added', comment && 'cmt', l.banner && 'bn'].filter(Boolean).join(' ')}>
               <span className="ln">{l.n}</span>
               {foldable && l.hasKids
                 ? <button type="button" className={`fold${folded.has(l.n) ? ' closed' : ''}`} aria-label={folded.has(l.n) ? `Expand ${l.text}` : `Collapse ${l.text}`} aria-expanded={!folded.has(l.n)} onClick={() => setFolded(s => { const n = new Set(s); if (n.has(l.n)) n.delete(l.n); else n.add(l.n); return n })}>
                     <svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
                   </button>
                 : <span className="fold-sp" />}
-              <code className="tx">{highlight(l.text)}</code>
+              <code className="tx">{l.banner ? l.text : highlight(l.text)}</code>
               {topSev && folded.has(l.n) && <span className={`dot dot-${topSev}`} aria-label={`${topSev} finding inside`} />}
               {fs && onSelect && (
                 <button type="button" className={`pin pin-${worst}`} onClick={() => onSelect(fs[0])} aria-label={`${fs.length} finding${fs.length > 1 ? 's' : ''} on line ${l.n}: ${fs[0].title}`}>{fs[0].rule}{fs.length > 1 ? ` +${fs.length - 1}` : ''}</button>

@@ -10,7 +10,8 @@ import { Link } from './ui.tsx'
 
 const START = maskSecrets(BRANCH).text
 
-const fixText = (f: Finding) => (f.fix?.apply ?? []).flatMap(b => [...b.parents.map((p, i) => ' '.repeat(i) + p), ...b.cmds.map(c => ' '.repeat(b.parents.length) + c), ...(b.parents.length ? ['exit'] : [])]).join('\n')
+const uniq = <T,>(bs: T[]) => [...new Map(bs.map(b => [JSON.stringify(b), b])).values()]
+const fixText = (f: Finding) => uniq(f.fix?.apply ?? []).flatMap(b => [...b.parents.map((p, i) => ' '.repeat(i) + p), ...b.cmds.map(c => ' '.repeat(b.parents.length) + c), ...(b.parents.length ? ['exit'] : [])]).join('\n')
 
 function Hero() {
   const [text, setText] = useState(START)
@@ -122,7 +123,7 @@ export function Landing() {
               <Link href="/app?sample=fleet" className="btn primary lg">Try the sample fleet</Link>
               <Link href="/app" className="btn on-dark lg">Audit your configs</Link>
             </div>
-            <p className="hero-note small">Runs in your browser. No agent, no SSH, no upload. Click a finding on the right, then Fix.</p>
+            <p className="hero-note small">Runs in your browser. No agent, no SSH, no upload. Click a finding in the demo, then Fix.</p>
           </div>
           <Hero />
         </div>
@@ -138,7 +139,7 @@ export function Landing() {
       </section>
 
       <section className="band">
-        <div className="wrap">
+        <div className="container">
           <div className="section-head">
             <div className="eyebrow">Why not grep</div>
             <h2>Regex on lines fails on block context. This parser does not.</h2>
@@ -156,7 +157,7 @@ export function Landing() {
       </section>
 
       <section className="band alt">
-        <div className="wrap split">
+        <div className="container split">
           <div>
             <div className="eyebrow">ACL reasoning</div>
             <h2>The deny you wrote is not the deny that runs.</h2>
@@ -168,7 +169,7 @@ export function Landing() {
       </section>
 
       <section className="band">
-        <div className="wrap">
+        <div className="container">
           <div className="section-head">
             <div className="eyebrow">How it works</div>
             <h2>From show run to a signed-off report in one sitting</h2>

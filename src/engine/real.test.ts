@@ -136,3 +136,31 @@ r3 | SUCCESS => {
 test('ACL-only snippets are accepted as Cisco config', () => {
   assert.ok(ingest({ name: 'acl.txt', text: 'ip access-list extended ACL_00\n permit udp any host 192.0.2.10\n' }).ok)
 })
+
+test('bundled Batfish sample: six IOS routers parse cleanly with BGP, OSPF and ACLs found', async () => {
+  const { SAMPLES } = await import('./samples.ts')
+  const s = SAMPLES.find(x => x.id === 'batfish')!
+  assert.equal(s.files.length, 6)
+  for (const f of s.files) {
+    const g = ingest(f)
+    assert.ok(g.ok && g.platform === 'ios' && g.hostname === f.name.replace('.cfg', ''), f.name)
+    assert.ok(!g.issues.some(i => i.level !== 'info'), `${f.name}: ${JSON.stringify(g.issues)}`)
+    const a = auditText(g.text)
+    assert.ok(a.score > 40 && a.score < 90, `${f.name} score ${a.score}`)
+    if (/^router ospf/m.test(f.text)) assert.ok(a.findings.some(x => x.rule === 'RTE-01'), `${f.name}: OSPF without authentication is found`)
+  }
+})
+
+test('ACL first-match attribution: only entries that actually catch traffic are blamed (Batfish as2dept1)', () => {
+  const [a] = extractAcls(parse('ip access-list extended RESTRICT_HOST_TRAFFIC_IN\n permit ip 2.128.0.0 0.0.255.255 any\n deny   ip any any\n permit icmp any any\n'))
+  const i = analyzeAcl(a)
+  assert.equal(i.length, 1)
+  assert.equal(i[0].kind, 'shadowed')
+  assert.deepEqual(i[0].by, [2, 3])
+  assert.match(i[0].detail, /line 2 \(permit\), line 3 \(deny\) catch all of its traffic first/)
+  // An overlapping deny whose overlap was already permitted earlier does not make the entry "shadowed".
+  const [b] = extractAcls(parse('ip access-list extended B\n permit tcp any any\n deny tcp host 192.0.2.1 any\n permit tcp host 192.0.2.1 any eq 22\n'))
+  const j = analyzeAcl(b).filter(x => x.line === 4)
+  assert.equal(j[0].kind, 'redundant')
+  assert.deepEqual(j[0].by, [2])
+})

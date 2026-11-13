@@ -370,12 +370,25 @@ export function analyzeAcl(acl: Acl): AceIssue[] {
     if (!overlapping.length) return
     const rest = remainder(ace.boxes, overlapping.flatMap(e => e.boxes))
     if (!rest || rest.length) return
-    // Fully covered. Decide shadowed vs redundant by what action the covering traffic actually gets.
-    const differing = overlapping.filter(e => e.action !== ace.action)
-    const single = overlapping.find(e => remainder(ace.boxes, e.boxes)?.length === 0)
-    const by = single ? [single.line] : overlapping.map(e => e.line)
-    if (differing.length) out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'shadowed', by, detail: `Never matches: ${single ? `line ${single.line}` : `lines ${by.join(', ')} together`} already ${differing.length === overlapping.length ? (ace.action === 'permit' ? (single ? 'denies' : 'deny') : (single ? 'permits' : 'permit')) : 'decide'} all of its traffic${differing.length === overlapping.length ? '' : ' (with mixed actions)'}.` })
-    else out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'redundant', by, detail: `Redundant: ${single ? `line ${single.line}` : `lines ${by.join(', ')} together`} already ${single ? (ace.action === 'deny' ? 'denies' : 'permits') : ace.action} all of its traffic. Safe to remove.` })
+    // Fully covered. Walk the earlier entries in first-match order to see which ones actually catch some of
+    // its traffic (an overlapping entry whose overlap was already taken by an even earlier one does not count).
+    let left: Box[] = ace.boxes
+    const takers: Ace[] = []
+    for (const e of overlapping) {
+      if (!boxesIntersect(left, e.boxes)) continue
+      const next = remainder(left, e.boxes)
+      if (!next) return
+      takers.push(e)
+      left = next
+      if (!left.length) break
+    }
+    const by = takers.map(e => e.line)
+    const who = takers.length === 1 ? `line ${by[0]}` : `lines ${by.join(', ')} together`
+    const verb = (a: string) => takers.length === 1 ? (a === 'deny' ? 'denies' : 'permits') : a
+    const differing = takers.filter(e => e.action !== ace.action)
+    if (!differing.length) out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'redundant', by, detail: `Redundant: ${who} already ${verb(ace.action)} all of its traffic. Safe to remove.` })
+    else if (differing.length === takers.length) out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'shadowed', by, detail: `Never matches: ${who} already ${verb(differing[0].action)} all of its traffic.` })
+    else out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'shadowed', by, detail: `Never matches: ${takers.map(e => `line ${e.line} (${e.action})`).join(', ')} catch all of its traffic first, with different actions.` })
   })
   return out
 }

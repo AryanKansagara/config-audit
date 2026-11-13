@@ -21,13 +21,13 @@ export default function Workspace() {
     void createSampleProject(s).then(p => go(`/app/p/${p.id}${tab ? '/' + tab : ''}`, { replace: true }))
   }, [list, busy])
 
-  const openSample = async () => { setBusy(true); const p = await createSampleProject('fleet'); go(`/app/p/${p.id}`) }
+  const openSample = async (id = 'fleet') => { setBusy(true); const p = await createSampleProject(id); go(`/app/p/${p.id}`) }
   const newProject = async () => {
     const p = await createBlankProject(`Audit ${new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`)
     go(`/app/p/${p.id}/configs`)
   }
 
-  if (list === null || busy) return <div className="boot" role="status"><span className="spinner" /> {busy ? 'Parsing the synthetic fleet' : 'Opening your audits'}</div>
+  if (list === null || busy) return <div className="boot" role="status"><span className="spinner" /> {busy ? 'Parsing the sample configs' : 'Opening your audits'}</div>
 
   return (
     <section className="page">
@@ -50,6 +50,7 @@ export default function Workspace() {
               {SAMPLES[0].files.map(f => <li key={f.name}><code>{f.name.replace('.cfg', '')}</code> {f.name.startsWith('BR') ? 'branch router with telnet and type 7 passwords' : f.name.startsWith('CORE') ? 'core switch with a shadowed ACL' : 'edge router, mostly hardened'}</li>)}
             </ul>
             <button type="button" className="btn primary" onClick={() => void openSample()}>Open the sample fleet</button>
+            <p className="small">Or audit real public configs: <button type="button" className="linkish" onClick={() => void openSample('batfish')}>the Batfish example network</button> (six lab routers, Apache-2.0).</p>
           </article>
           <article className="onboard-card">
             <div className="eyebrow">Your network</div>
@@ -67,7 +68,8 @@ export default function Workspace() {
           <div className="project-grid">
             {list.map(p => <ProjectCard key={p.id} p={p} />)}
           </div>
-          {!list.some(p => p.sampleId) && <p className="muted small samples-row">Want to see a full example? <button type="button" className="linkish" onClick={() => void openSample()}>Open the sample fleet</button></p>}
+          {!list.some(p => p.sampleId === 'fleet') && <p className="muted small samples-row">Want to see a full example? <button type="button" className="linkish" onClick={() => void openSample()}>Open the sample fleet</button></p>}
+          {!list.some(p => p.sampleId === 'batfish') && <p className="muted small samples-row">Real public configs: <button type="button" className="linkish" onClick={() => void openSample('batfish')}>audit the Batfish example network</button> (six lab routers, Apache-2.0).</p>}
         </>
       )}
     </section>
@@ -85,7 +87,7 @@ function ProjectCard({ p }: { p: Project }) {
             <input name="n" defaultValue={p.name} autoFocus aria-label="Audit name" onBlur={e => e.currentTarget.form?.requestSubmit()} />
           </form>
         ) : <h3><Link href={`/app/p/${p.id}`}>{p.name}</Link></h3>}
-        {p.sampleId && <SyntheticBadge />}
+        {p.sampleId && <SyntheticBadge id={p.sampleId} />}
       </div>
       <div className="row gap">
         {last ? <ScoreRing score={last.score} size={64} label="Last snapshot score" /> : <div className="ring-empty" aria-hidden="true">—</div>}

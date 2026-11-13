@@ -19,7 +19,15 @@ export function runAudits(p: Project, ds: Dataset): { audits: DeviceAudit[]; con
   return { configs, audits: configs.map(c => auditConfig(c, p.settings, p.waivers)) }
 }
 
-export async function createSampleProject(sampleId = 'fleet'): Promise<Project> {
+// One in-flight creation per sample, so a double click (or a re-run effect) never makes two copies.
+const creating = new Map<string, Promise<Project>>()
+export function createSampleProject(sampleId = 'fleet'): Promise<Project> {
+  const p = creating.get(sampleId) ?? buildSample(sampleId).finally(() => creating.delete(sampleId))
+  creating.set(sampleId, p)
+  return p
+}
+
+async function buildSample(sampleId: string): Promise<Project> {
   const existing = getProjects().find(p => p.sampleId === sampleId)
   if (existing) return existing
   const def = SAMPLES.find(s => s.id === sampleId)!

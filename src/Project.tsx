@@ -75,7 +75,7 @@ export default function ProjectView({ id, tab: rawTab, arg }: { id: string; tab:
           {!empty && <ScoreRing score={fleet.score} grade={fleet.grade} size={76} label="Fleet score" />}
           <div>
             <div className="eyebrow"><Link href="/app">Audits</Link></div>
-            <h1 className="row gap-sm wrap">{project.name} {project.sampleId && <SyntheticBadge />}</h1>
+            <h1 className="row gap-sm wrap">{project.name} {project.sampleId && <SyntheticBadge id={project.sampleId} />}</h1>
             {!empty && <p className="muted small" style={{ margin: 0 }}>{audits.length} device{audits.length > 1 ? 's' : ''} · {fleet.total} open findings · {fleet.critical} critical · {fleet.waived} waived</p>}
           </div>
         </div>

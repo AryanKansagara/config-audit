@@ -34,7 +34,7 @@ export default function Report({ id }: { id: string }) {
       <header className="report-head">
         <div>
           <div className="eyebrow">Configuration hardening audit</div>
-          <h1>{project.name} {project.sampleId && <SyntheticBadge />}</h1>
+          <h1>{project.name} {project.sampleId && <SyntheticBadge id={project.sampleId} />}</h1>
           <p className="muted">{audits.length} devices · generated {fmtDate(Date.now())} · checks modelled on CIS Cisco IOS Benchmark and DISA STIG network device themes</p>
         </div>
         <ScoreRing score={fleet.score} grade={fleet.grade} size={110} label="Fleet score" />

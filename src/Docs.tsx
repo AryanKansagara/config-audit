@@ -84,6 +84,14 @@ export default function Docs() {
         <li>IPv6 ACLs are listed by name but not analysed for shadowing.</li>
         <li>Remediation scripts use the defaults on the <Link href="/settings">Settings</Link> page (management subnets, NTP and syslog servers). Review them, apply in a change window, and keep the <code>reload in</code> safety net on remote devices.</li>
       </ul>
+
+      <h2 id="tested">7. Tested against real configs</h2>
+      <p>Besides the synthetic sample, the importer and rules are regression-tested against public configs (checked November 13, 2026):</p>
+      <ul>
+        <li><a href="https://github.com/batfish/batfish/tree/master/networks/example/live/configs" target="_blank" rel="noreferrer">Batfish example network</a> (Apache-2.0): six IOS lab routers with BGP peer-groups, OSPF and route-maps. Bundled unmodified as the "Batfish example network" sample on the <Link href="/app">Audits</Link> page.</li>
+        <li><a href="https://github.com/mpenning/ciscoconfparse/tree/main/tests/fixtures/configs" target="_blank" rel="noreferrer">ciscoconfparse test fixtures</a> (GPL-3.0, used for testing only, not bundled): IOS routers and access points, a 39,000-line IOS switch config, an NX-OS 6.2 Nexus 7000 and an ASA 9.x firewall.</li>
+      </ul>
+      <p>Fixes from that run: SNMPv3 priv keys, ASA trap communities, RADIUS keys after port options, PPP, FTP, HSRP and keyring secrets are now masked; NX-OS SHA-crypt type 5 hashes are no longer called weak; BGP passwords on peer-groups count for their members; ASA object NAT objects are no longer reported as unused.</p>
     </section>
   )
 }

@@ -507,3 +507,4 @@ kbd { font: 12px var(--font-mono); padding: 1px 6px; border: 1px solid var(--lin
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+.feature-card .linkish { color: var(--sky); text-decoration: underline; }

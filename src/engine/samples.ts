@@ -1,7 +1,9 @@
 // Three synthetic devices. Every address is RFC 1918 or RFC 5737 documentation space; every
 // secret is fake. They are labelled synthetic everywhere they appear in the app.
 
-export interface Sample { id: string; name: string; blurb: string; files: { name: string; text: string }[]; previous?: { name: string; text: string }[] }
+import { BATFISH_FILES, BATFISH_SOURCE } from './samples-public.ts'
+
+export interface Sample { id: string; name: string; blurb: string; /** Set for genuinely public data (not synthetic) */ source?: { url: string; licence: string }; files: { name: string; text: string }[]; previous?: { name: string; text: string }[] }
 
 export const BRANCH = `Building configuration...
 
@@ -415,5 +417,9 @@ export const SAMPLES: Sample[] = [
     id: 'fleet', name: 'Three-device fleet', blurb: 'A branch router with telnet and type 7 passwords, a core switch with a shadowed ACL, and a mostly hardened edge router.',
     files: [{ name: 'BR-RTR-01.cfg', text: BRANCH }, { name: 'CORE-SW-01.cfg', text: CORE }, { name: 'EDGE-RTR-01.cfg', text: EDGE }],
     previous: [{ name: 'BR-RTR-01.cfg', text: BRANCH_OLD }, { name: 'CORE-SW-01.cfg', text: CORE.replace(' 70 permit udp 10.0.0.0 0.255.255.255 host 10.30.1.53 eq 53\n', '') }, { name: 'EDGE-RTR-01.cfg', text: EDGE.replace(' neighbor 198.51.100.1 password 7 1511021F07257A767B\n', '') }],
+  },
+  {
+    id: 'batfish', name: 'Batfish example network', blurb: 'Six real lab routers (three AS, border/core/distribution/department) from the public Batfish example network, Apache-2.0.',
+    files: BATFISH_FILES, source: { url: BATFISH_SOURCE, licence: 'Apache-2.0' },
   },
 ]

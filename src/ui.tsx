@@ -303,4 +303,6 @@ export function Empty({ title, children, icon }: { title: string; children?: Rea
   return <div className="empty">{icon ?? <div className="empty-icon" aria-hidden="true" />}<h3>{title}</h3>{children}</div>
 }
 
-export const SyntheticBadge = () => <span className="badge synthetic" title="Synthetic sample, not a real device">Synthetic</span>
+export const SyntheticBadge = ({ id }: { id?: string }) => id === 'batfish'
+  ? <span className="badge synthetic" title="Real lab configs from the public Batfish example network (Apache-2.0)">Public data</span>
+  : <span className="badge synthetic" title="Synthetic sample, not a real device">Synthetic</span>

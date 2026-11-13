@@ -205,7 +205,7 @@ export const RULES: Rule[] = [
     rationale: 'Idle sessions left open are a hijack risk. The usual baseline is 10 minutes or less; "exec-timeout 0 0" disables it.',
     check: ({ c, s }) => vtys(c).filter(l => !timeoutOk(l, s.execTimeout) && (!!child(l, /^exec-timeout /) || c.platform === 'nxos')).map(l => {
       const t = child(l, /^exec-timeout /)
-      return { target: l.text, line: (t ?? l).n, detail: t ? `"${t.text}" is ${/ 0( 0)?$/.test(t.text) ? 'disabled' : `over ${s.execTimeout} minutes`}.` : 'No exec-timeout; NX-OS VTY sessions never time out by default.', fix: inCtx(l.text, [c.platform === 'nxos' ? `exec-timeout ${s.execTimeout}` : `exec-timeout ${s.execTimeout} 0`], [t ? t.text : 'no exec-timeout']) }
+      return { target: l.text, line: (t ?? l).n, detail: t ? `"${t.text}" is ${/^exec-timeout 0( 0)?$/.test(t.text) ? 'disabled' : `over ${s.execTimeout} minutes`}.` : 'No exec-timeout; NX-OS VTY sessions never time out by default.', fix: inCtx(l.text, [c.platform === 'nxos' ? `exec-timeout ${s.execTimeout}` : `exec-timeout ${s.execTimeout} 0`], [t ? t.text : 'no exec-timeout']) }
     }),
   },
   {
@@ -298,7 +298,7 @@ export const RULES: Rule[] = [
       const user = l.text.split(/\s+/)[1]
       const priv = l.text.match(/privilege \d+/)?.[0]
       const cmd = c.platform === 'asa' ? `username ${user} password <NEW-PASSWORD>${priv ? ' ' + priv : ''}` : c.platform === 'nxos' ? `username ${user} password <NEW-PASSWORD>` : `username ${user}${priv ? ' ' + priv : ''} algorithm-type scrypt secret <NEW-PASSWORD>`
-      return { target: `username ${user}`, line: l.n, detail: `User ${user} has a weak password (${/ password 7 /.test(l.text) ? 'type 7' : / (secret|password) 5 /.test(l.text) ? 'type 5 MD5' : 'clear text or legacy'}).`, fix: { apply: [{ parents: [], cmds: [cmd] }], rollback: [{ parents: [], cmds: ['! the old password was masked on import; keep the new one'] }], note: 'Replace <NEW-PASSWORD>. The old value was masked on import and is not stored.', order: 1 } }
+      return { target: `username ${user}`, line: l.n, detail: `User ${user} has a weak password (${/ password 7 /.test(l.text) ? 'type 7' : / (secret|password) 5 /.test(l.text) ? 'type 5 MD5' : / encrypted\b/.test(l.text) ? 'legacy ASA MD5 hash' : 'clear text or legacy'}).`, fix: { apply: [{ parents: [], cmds: [cmd] }], rollback: [{ parents: [], cmds: ['! the old password was masked on import; keep the new one'] }], note: 'Replace <NEW-PASSWORD>. The old value was masked on import and is not stored.', order: 1 } }
     }),
   },
   {
@@ -537,9 +537,20 @@ export const RULES: Rule[] = [
     id: 'RTE-02', title: 'BGP neighbors use a password', severity: 'medium', category: 'Routing', ref: 'CIS 3.3 Routing rules', platforms: ['ios', 'iosxe', 'nxos'],
     rationale: 'TCP MD5 (or TCP-AO) on eBGP sessions blocks spoofed resets and session hijacks.',
     check: ({ c }) => find(c, /^router bgp \d+/).flatMap(r => {
-      const peers = new Set<string>()
-      for (const l of r.children) { const m = l.text.match(/^neighbor (\d+\.\d+\.\d+\.\d+) remote-as/); if (m) peers.add(m[1]) }
-      for (const l of r.children) for (const ch of [l, ...l.children]) { const m = ch.text.match(/^(?:neighbor (\S+) )?password /); if (m?.[1]) peers.delete(m[1]); else if (m && l.text.startsWith('neighbor ')) peers.delete(l.text.split(' ')[1]) }
+      // Peers are IPs with "remote-as" or a peer-group membership; a password on the peer-group (or NX-OS template) covers its members.
+      const peers = new Set<string>(), group = new Map<string, string>(), keyed = new Set<string>()
+      for (const l of r.children) {
+        const m = l.text.match(/^neighbor (\d+\.\d+\.\d+\.\d+)(?: remote-as| peer-group (\S+)| inherit peer (\S+))/)
+        if (m) { peers.add(m[1]); if (m[2] ?? m[3]) group.set(m[1], (m[2] ?? m[3])!) }
+      }
+      for (const l of r.children) for (const ch of [l, ...l.children]) {
+        const m = ch.text.match(/^(?:neighbor (\S+) )?password /)
+        // Administratively shut neighbors carry no session, so they are not flagged.
+        const sh = ch.text.match(/^neighbor (\S+) shutdown$/) ?? (ch.text === 'shutdown' && /^neighbor /.test(l.text) ? [, l.text.split(' ')[1]] : null)
+        if (sh) keyed.add(sh[1]!)
+        if (m?.[1]) keyed.add(m[1]); else if (m && /^(neighbor|template peer) /.test(l.text)) keyed.add(l.text.split(' ')[l.text.startsWith('template') ? 2 : 1])
+      }
+      for (const p of [...peers]) if (keyed.has(p) || keyed.has(group.get(p) ?? '')) peers.delete(p)
       return [...peers].map(p => ({ target: `${r.text} neighbor ${p}`, line: r.n, detail: `BGP neighbor ${p} has no password.`, fix: inCtx(r.text, [`neighbor ${p} password <BGP-KEY>`], [`no neighbor ${p} password`]) }))
     }),
   },

@@ -374,8 +374,8 @@ export function analyzeAcl(acl: Acl): AceIssue[] {
     const differing = overlapping.filter(e => e.action !== ace.action)
     const single = overlapping.find(e => remainder(ace.boxes, e.boxes)?.length === 0)
     const by = single ? [single.line] : overlapping.map(e => e.line)
-    if (differing.length) out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'shadowed', by, detail: `Never matches: ${single ? `line ${single.line}` : `lines ${by.join(', ')} together`} already ${differing.length === overlapping.length ? (ace.action === 'permit' ? 'deny' : 'permit') : 'decide'} all of its traffic${differing.length === overlapping.length ? '' : ' (with mixed actions)'}.` })
-    else out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'redundant', by, detail: `Redundant: ${single ? `line ${single.line}` : `lines ${by.join(', ')} together`} already ${ace.action} all of its traffic. Safe to remove.` })
+    if (differing.length) out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'shadowed', by, detail: `Never matches: ${single ? `line ${single.line}` : `lines ${by.join(', ')} together`} already ${differing.length === overlapping.length ? (ace.action === 'permit' ? (single ? 'denies' : 'deny') : (single ? 'permits' : 'permit')) : 'decide'} all of its traffic${differing.length === overlapping.length ? '' : ' (with mixed actions)'}.` })
+    else out.push({ acl: acl.name, line: ace.line, text: ace.text, kind: 'redundant', by, detail: `Redundant: ${single ? `line ${single.line}` : `lines ${by.join(', ')} together`} already ${single ? (ace.action === 'deny' ? 'denies' : 'permits') : ace.action} all of its traffic. Safe to remove.` })
   })
   return out
 }
@@ -386,7 +386,7 @@ export function aclReferences(c: Config): Map<string, number[]> {
   const add = (name: string, n: number) => { const l = refs.get(name) ?? []; l.push(n); refs.set(name, l) }
   const pats: RegExp[] = [
     /^ip access-group (\S+) (?:in|out)/, /^ipv4 access-group (\S+)/, /^access-class (\S+)/, /^ip access-class (\S+)/,
-    /^access-group (\S+) (?:in|out|global)/, /^match (?:ip )?address (?!prefix-list)(.+)$/, /^match access-group name (\S+)/, /^match access-group (\S+)/,
+    /^access-group (\S+) (?:in|out|global)/, /^match (?:ip )?address (?!prefix-list)(.+)$/, /^match access-group name (\S+)/, /^match access-group (?!name )(\S+)/,
     /^ntp access-group (?:peer|serve|serve-only|query-only) (\S+)/, /^ip http access-class (?:ipv4 )?(\S+)/, /^distribute-list (\S+)/,
     /^ip nat (?:inside|outside) source list (\S+)/, /^(?:ssh|http|telnet) access-list (\S+)/, /^nat \(.*\) .*access-list (\S+)/, /^vpn-filter value (\S+)/,
     /^split-tunnel-network-list value (\S+)/, /^ip igmp access-group (\S+)/, /^snmp-server (?:tftp-server-list|file-transfer access-group) (\S+)/,
@@ -414,9 +414,12 @@ export function aclReferences(c: Config): Map<string, number[]> {
 /** Object-group names referenced anywhere other than their own definition. */
 export function objectGroupUsage(c: Config): { name: string; line: number; used: boolean }[] {
   const defs = c.top.filter(l => /^(object-group (?:network|service|ip address|ip port|protocol|icmp-type) \S+|object (?:network|service) \S+)/.test(l.text))
-  return defs.map(d => {
+  const seen = new Set<string>()
+  return defs.filter(d => !seen.has(d.text) && !!seen.add(d.text)).map(d => {
     const name = d.text.split(/\s+/)[d.text.startsWith('object-group ip') ? 3 : 2]
     const re = new RegExp(`(^|\\s)(object-group|object|addrgroup|portgroup|group-object|network-object object|service-object object)\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`)
+    // ASA object NAT ("object network X" / " nat (in,out) dynamic interface") uses the object itself, often in a second block of the same name.
+    if (defs.some(o => o.text === d.text && o.children.some(ch => /^nat /.test(ch.text)))) return { name, line: d.n, used: true }
     const used = c.lines.some(l => !l.banner && l !== d && !l.text.startsWith('object-group ') && !l.text.startsWith('object ') && re.test(l.text)
       || l.parent && l.parent !== d && re.test(l.text) && /^(group-object|network-object object)/.test(l.text))
     return { name, line: d.n, used }

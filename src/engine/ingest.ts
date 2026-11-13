@@ -1,7 +1,7 @@
 // Import: split pasted text or files into device configs, detect platform, mask secrets, and
 // produce a validation report with line numbers.
 
-import { maskSecrets, type MaskedSecret } from './mask.ts'
+import { looksSecret, maskSecrets, type MaskedSecret } from './mask.ts'
 import { detectPlatform, parse, type Platform } from './parse.ts'
 
 export interface RawFile { name: string; text: string }
@@ -24,6 +24,15 @@ const START = /^(Building configuration\.\.\.|Current configuration : \d+ bytes|
 export function splitConfigs(f: RawFile): RawFile[] {
   const text = f.text.replace(/^﻿/, '').replace(/\r\n?/g, '\n')
   const trimmed = text.trim()
+  // Ansible ad-hoc output: "R1 | SUCCESS => { ...facts... }", one block per host.
+  if (/^\S+ \| (SUCCESS|CHANGED) => \{/m.test(trimmed)) {
+    const out: RawFile[] = []
+    for (const part of trimmed.split(/^(?=\S+ \| (?:SUCCESS|CHANGED|FAILED!|UNREACHABLE!) => )/m)) {
+      const m = part.match(/^(\S+) \| (SUCCESS|CHANGED) => (\{[\s\S]*\})\s*$/)
+      if (m) try { out.push(...fromAnsible(JSON.parse(m[3]), m[1])) } catch { /* that host had no config facts */ }
+    }
+    if (out.length) return out
+  }
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try { return fromAnsible(JSON.parse(trimmed), f.name) } catch { /* not JSON, fall through */ }
   }
@@ -53,18 +62,19 @@ function fromAnsible(j: unknown, name: string): RawFile[] {
     if (!v || typeof v !== 'object') return
     const o = v as Record<string, unknown>
     const facts = (o.ansible_facts ?? o) as Record<string, unknown>
-    const cfg = facts.ansible_net_config ?? (o.config as unknown)
-    if (typeof cfg === 'string') { out.push({ name: String(facts.ansible_net_hostname ?? label), text: cfg }); return }
+    // Module output uses "ansible_net_config"; the "ansible_facts" variable (e.g. "{{ ansible_facts | to_nice_json }}") drops the prefix.
+    const cfg = facts.ansible_net_config ?? facts.net_config ?? (o.config as unknown)
+    if (typeof cfg === 'string') { out.push({ name: String(facts.ansible_net_hostname ?? facts.net_hostname ?? label), text: cfg }); return }
     if (Array.isArray(v)) v.forEach((x, i) => visit(x, `${label}[${i}]`))
     else for (const [k, x] of Object.entries(o)) if (x && typeof x === 'object') visit(x, k)
   }
   visit(j, name)
-  if (!out.length) throw new Error('no ansible_net_config found')
+  if (!out.length) throw new Error('no ansible_net_config / net_config found')
   return out
 }
 
 export function looksLikeCisco(text: string) {
-  return /^(hostname|switchname|interface|line vty|version \d|ASA Version|ip route|router |access-list|feature |snmp-server|logging |aaa )/m.test(text)
+  return /^(hostname|switchname|interface|line vty|version \d|ASA Version|ip route|router |access-list|ip access-list|vlan \d|feature |snmp-server|logging |aaa )/m.test(text)
 }
 
 export function ingest(f: RawFile): Ingested {
@@ -85,6 +95,8 @@ export function ingest(f: RawFile): Ingested {
   })
   const bannerOpen = c.top.find(l => /^banner /.test(l.text) && l.children.length && !l.children[l.children.length - 1].text.includes(l.text.match(/^banner \S+ (\^C|.)/)?.[1] ?? '\u0000'))
   if (bannerOpen) issues.push({ line: bannerOpen.n, level: 'warn', message: 'Banner delimiter never closes; the rest of the file was read as banner text.' })
+  // Safety net: anything that still looks like a secret after masking is flagged so it can be checked before sharing.
+  text.split('\n').forEach((l, i) => { if (!c.lines.some(x => x.n === i + 1 && x.banner) && looksSecret(l)) issues.push({ line: i + 1, level: 'warn', message: `Possible secret the masker did not recognise: "${l.trim().split(/\s+/).slice(0, 3).join(' ')} ...". Check before sharing.` }) })
   if (secrets.length) issues.push({ level: 'info', message: `Masked ${secrets.length} secret${secrets.length > 1 ? 's' : ''} (${summarizeSecrets(secrets)}). Only the type and whether it is weak are kept.` })
   const hostname = c.hostname || f.name.replace(/\.(txt|cfg|conf|config|log)$/i, '').replace(/[^\w.-]+/g, '-')
   return { source: f.name, hostname, platform, text, lines, secrets, issues: issues.slice(0, 60), ok: !issues.some(i => i.level === 'error') }

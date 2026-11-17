@@ -32,4 +32,4 @@ Copy `.env.example` to `.env` for sync (public Supabase URL and publishable key)
 
 Two samples ship with the app: a synthetic three-device fleet (RFC 1918 / RFC 5737 addresses only) and the public [Batfish example network](https://github.com/batfish/batfish/tree/master/networks/example/live/configs) (six real lab routers, Apache-2.0, bundled unmodified). The importer is also regression-tested against the ciscoconfparse fixtures (IOS, NX-OS, ASA); see /docs#tested.
 
-Built by Aryan Kansagara. Independent project, not affiliated with Cisco.
+Built by Aryan Kansagara.

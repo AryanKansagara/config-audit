@@ -84,7 +84,7 @@ export default function Report({ id }: { id: string }) {
           </table>
         )}
       </section>
-      <footer className="small muted report-foot">Secrets were masked on import; no password, key or community value appears in this report. Generated with Config Audit, an independent project not affiliated with Cisco.</footer>
+      <footer className="small muted report-foot">Secrets were masked on import; no password, key or community value appears in this report. Generated with Config Audit.</footer>
     </article>
   )
 }

@@ -71,11 +71,12 @@ export function ConfigView({ text, findings, selected, onSelect, added, maxHeigh
 }) {
   const lines = useMemo<ViewLine[]>(() => {
     const raw = text.split('\n')
+    const asa = /^\s*(: )?ASA Version \d/m.test(text) || /^\s*nameif\s+\S+/m.test(text)
     let top = 0
     let delim: string | null = null
     const out = raw.map((t, i) => {
       if (delim !== null) { const end = t.includes(delim); if (end) delim = null; return { n: i + 1, text: t, indent: 1, top, hasKids: false, banner: true } }
-      const b = t.match(/^banner \S+ (\^C|.)(.*)$/)
+      const b = !asa && t.match(/^banner \S+ (\^C|.)(.*)$/)
       if (b && !b[2].includes(b[1])) delim = b[1]
       const indent = t.length - t.trimStart().length
       if (indent === 0 && t.trim() && !t.startsWith('!')) top = i + 1

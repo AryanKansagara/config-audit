@@ -35,9 +35,10 @@ export function snapshotNow(project: Project, ds: Dataset, audits: DeviceAudit[]
 }
 
 export default function ProjectView({ id, tab: rawTab, arg }: { id: string; tab: string; arg?: string }) {
-  const { loading, project, ds, update, audits, configs } = useProject(id)
+  const { loading, project, ds, legacyUnmasked, maskStoredCopy, update, audits, configs } = useProject(id)
   const tab = (rawTab === 'device' || TABS.some(t => t[0] === rawTab) ? rawTab : 'overview') as Tab
   const [help, setHelp] = useState(false)
+  const [maskBusy, setMaskBusy] = useState(false)
 
   useEffect(() => { if (project) document.title = `${project.name} · Config Audit` }, [project?.name])
 
@@ -88,6 +89,12 @@ export default function ProjectView({ id, tab: rawTab, arg }: { id: string; tab:
         )}
       </div>
       {project.dataMissing && <div className="banner-warn">This audit was synced from another device, but its configs were too large to sync. Findings and snapshots are here; re-import the configs on the Configs tab to re-run the audit.</div>}
+      {legacyUnmasked && (
+        <div className="banner-warn row between wrap gap-sm">
+          <span>This saved audit contains unmasked values from an earlier import. Nothing was deleted; values are masked in the viewer and blocked from sync and export.</span>
+          <button type="button" className="btn outline sm" disabled={maskBusy} onClick={() => { setMaskBusy(true); void maskStoredCopy().then(() => toast('Masked stored configs and snapshots', { tone: 'ok' })).finally(() => setMaskBusy(false)) }}>Mask stored copy</button>
+        </div>
+      )}
       <nav className="tabs" aria-label="Audit sections">
         {TABS.map(([t, l], i) => <Link key={t} href={`/app/p/${id}${t === 'overview' ? '' : '/' + t}`} aria-current={t === tab || (tab === 'device' && t === 'overview') ? 'page' : undefined} title={`${l} (${i + 1})`}>{l}{t === 'findings' && !empty ? <span className="count">{fleet.total}</span> : null}</Link>)}
       </nav>

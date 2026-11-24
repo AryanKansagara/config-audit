@@ -56,14 +56,21 @@ test('hash types: NX-OS type 5 with $5$ is SHA-crypt (strong), $1$ is MD5, type 
   assert.deepEqual(secrets.map(s => [s.type, s.weak]), [['sha-crypt', false], ['5', true], ['3', true]])
 })
 
-test('import warns about lines that still look like secrets, but not BGP communities', () => {
+test('import masks isis password and blocks unrecognised secret-like lines, but ignores BGP communities', () => {
   assert.equal(looksSecret('set community 65001:2 additive'), false)
   assert.equal(looksSecret('match community as2_community'), false)
   assert.equal(looksSecret('ip bgp-community new-format'), false)
   assert.equal(looksSecret(' isis password Sup3rS3cret'), true)
-  const g = ingest({ name: 'r1.cfg', text: 'hostname R1\nrouter isis\n isis password Sup3rS3cret\nroute-map RM permit 10\n set community 1:2 additive\nend\n' })
-  const warns = g.issues.filter(i => /Possible secret/.test(i.message))
-  assert.deepEqual(warns.map(w => w.line), [3])
+  const isisOk = ingest({ name: 'r1.cfg', text: 'hostname R1\nrouter isis\n isis password Sup3rS3cret\nroute-map RM permit 10\n set community 1:2 additive\nend\n' })
+  assert.equal(isisOk.ok, true)
+  assert.ok(!isisOk.text.includes('Sup3rS3cret'))
+  assert.match(isisOk.text, /isis password <masked:weak>/)
+  const g = ingest({ name: 'r2.cfg', text: 'hostname R2\nfoo-daemon auth-key UnrecognisedSecret\nroute-map RM permit 10\n set community 1:2 additive\nend\n' })
+  assert.equal(g.ok, false)
+  const errs = g.issues.filter(i => /Possible secret/.test(i.message))
+  assert.deepEqual(errs.map(w => [w.line, w.level]), [[2, 'error']])
+  assert.ok(!g.text.includes('UnrecognisedSecret'))
+  assert.ok(!errs.some(e => e.message.includes('UnrecognisedSecret')))
 })
 
 test('exec-timeout 15 0 is reported as too long, not as disabled', () => {

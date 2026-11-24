@@ -206,6 +206,7 @@ const LATE: RegExp[] = [
 // Free text and negated commands: not configuration, but people leave passwords in them.
 const FREE_TEXT = /^\s*(?:!|:|no\s|description\s|remark\s|.*\sremark\s)/i
 const FREE_SECRET = new RegExp(`(\\b(?:password|passwd|passphrase|secret|pre-shared-key|snmp-server\\s+community)\\b(?:\\s*[:=]\\s*|\\s+)(?:is\\s+)?(?:[0-9]\\s+)?)(${VAL})`, 'gi')
+const FREE_KEY = new RegExp(`(\\b(?:pre-?shared )?key(?:\\s*[:=]\\s*|\\s+is\\s+|\\s+))(?!chain\\b|config-key\\b)(${VAL})`, 'gi')
 
 function maskLate(line: string, onMask: () => void): string {
   const rep = (_all: string, keep: string, v: string) => {
@@ -216,6 +217,7 @@ function maskLate(line: string, onMask: () => void): string {
   let out = line
   for (const re of LATE) out = out.replace(re, rep)
   if (FREE_TEXT.test(out)) out = out.replace(FREE_SECRET, rep)
+  if (/^\s*(?:!|description\s|remark\s|.*\sremark\s)/i.test(out)) out = out.replace(FREE_KEY, rep)
   return out
 }
 
@@ -227,6 +229,7 @@ export function maskSecrets(text: string): { text: string; secrets: MaskedSecret
   const lines = normalized.split('\n')
   const stack: { indent: number; text: string }[] = []
   const bannerLines = new Set<number>()
+  let fhrpIndent = -1
   let bannerEnd: string | null = null
 
   for (let i = 0; i < lines.length; i++) {
@@ -335,6 +338,16 @@ export function maskSecrets(text: string): { text: string; secrets: MaskedSecret
   }
   for (let i = 0; i < lines.length; i++) {
     if (bannerLines.has(i)) continue
+    const ind = indentOf(lines[i])
+    if (lines[i].trim() && !lines[i].trim().startsWith('!')) {
+      if (fhrpIndent >= 0 && ind <= fhrpIndent) fhrpIndent = -1
+      if (/^\s*(?:hsrp|vrrp)\s+\d+/.test(lines[i])) fhrpIndent = ind
+    }
+    // NX-OS: a bare "authentication <string>" inside an hsrp or vrrp group is the plain-text key.
+    if (fhrpIndent >= 0) lines[i] = lines[i].replace(new RegExp(`^(\\s+authentication\\s+)(?!md5\\b|text\\b|key-chain\\b|<masked)(${VAL})\\s*$`), (_all, keep: string) => {
+      secrets.push({ line: i + 1, kind: 'fhrp', type: '0', weak: true, reason: 'Plain text' })
+      return keep + MASK_WEAK
+    })
     lines[i] = maskLate(lines[i], () => secrets.push({ line: i + 1, kind: 'other', type: '0', weak: false, reason: 'Other secret value' }))
   }
   return { text: lines.join('\n'), secrets }

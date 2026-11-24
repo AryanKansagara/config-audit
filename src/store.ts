@@ -18,6 +18,8 @@ export interface Device {
   lines: number
   secrets: MaskedSecret[]
   issues: Issue[]
+  incomplete?: boolean
+  confirmedComplete?: boolean
 }
 
 export interface Project {

@@ -23,8 +23,10 @@ export interface Finding {
 export interface DeviceAudit {
   host: string
   platform: Platform
-  score: number
-  grade: string
+  score: number | null
+  grade: string | null
+  incomplete?: boolean
+  confirmedComplete?: boolean
   findings: Finding[]
   /** Rule ids evaluated for this platform */
   evaluated: number
@@ -33,9 +35,13 @@ export interface DeviceAudit {
   inventory: Inventory
 }
 
+export type CompleteDeviceAudit = DeviceAudit & { score: number; grade: string }
+
 export const waiverActive = (w: Waiver | undefined, today = new Date().toISOString().slice(0, 10)) => !!w && w.expires >= today
 
-export function auditConfig(c: Config, settings: Settings = DEFAULT_SETTINGS, waivers: Record<string, Waiver> = {}, today?: string): DeviceAudit {
+export function auditConfig(c: Config, settings?: Settings, waivers?: Record<string, Waiver>, today?: string): CompleteDeviceAudit
+export function auditConfig(c: Config, settings: Settings, waivers: Record<string, Waiver>, today: string | undefined, opts: { incomplete?: boolean; confirmedComplete?: boolean }): DeviceAudit
+export function auditConfig(c: Config, settings: Settings = DEFAULT_SETTINGS, waivers: Record<string, Waiver> = {}, today?: string, opts?: { incomplete?: boolean; confirmedComplete?: boolean }): DeviceAudit {
   const ctx = context(c, settings)
   const host = c.hostname || 'unnamed'
   const findings: Finding[] = []
@@ -56,8 +62,22 @@ export function auditConfig(c: Config, settings: Settings = DEFAULT_SETTINGS, wa
     else passed++
   }
   findings.sort((a, b) => SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(b.severity) || (a.line ?? 0) - (b.line ?? 0))
+  const confirmedComplete = Boolean(opts?.confirmedComplete)
+  const incomplete = Boolean(opts?.incomplete && !confirmedComplete)
   const score = total ? Math.round(100 * (total - lost) / total) : 100
-  return { host, platform: c.platform, score, grade: grade(score), findings, evaluated, passed, ctx, inventory: inventory(c) }
+  return {
+    host,
+    platform: c.platform,
+    score: incomplete ? null : score,
+    grade: incomplete ? null : grade(score),
+    ...(incomplete ? { incomplete: true } : {}),
+    ...(confirmedComplete ? { confirmedComplete: true } : {}),
+    findings,
+    evaluated,
+    passed,
+    ctx,
+    inventory: inventory(c),
+  }
 }
 
 function safeCheck(r: Rule, ctx: Ctx) {
@@ -186,11 +206,13 @@ export const aclSummary = (a: DeviceAudit): AclSummary[] => a.ctx.acls.map(acl =
 // ---------- Fleet ----------
 
 export function fleetScore(devices: DeviceAudit[]) {
-  if (!devices.length) return { score: 0, grade: 'F', critical: 0, high: 0, medium: 0, low: 0, waived: 0, total: 0 }
-  const score = Math.round(devices.reduce((s, d) => s + d.score, 0) / devices.length)
+  if (!devices.length) return { score: null as number | null, grade: null as string | null, scoredCount: 0, incompleteCount: 0, critical: 0, high: 0, medium: 0, low: 0, waived: 0, total: 0 }
+  const scored = devices.filter((d): d is CompleteDeviceAudit => !d.incomplete && d.score !== null)
+  const incompleteCount = devices.length - scored.length
+  const score = scored.length ? Math.round(scored.reduce((s, d) => s + d.score, 0) / scored.length) : null
   const live = devices.flatMap(d => d.findings.filter(f => !f.waived))
   const n = (s: Severity) => live.filter(f => f.severity === s).length
-  return { score, grade: grade(score), critical: n('critical'), high: n('high'), medium: n('medium'), low: n('low'), waived: devices.flatMap(d => d.findings).filter(f => f.waived).length, total: live.length }
+  return { score, grade: score !== null ? grade(score) : null, scoredCount: scored.length, incompleteCount, critical: n('critical'), high: n('high'), medium: n('medium'), low: n('low'), waived: devices.flatMap(d => d.findings).filter(f => f.waived).length, total: live.length }
 }
 
 // ---------- CSV ----------

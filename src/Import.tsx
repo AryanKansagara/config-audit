@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { ingest, PLATFORM_LABEL, splitConfigs, summarizeSecrets, type Ingested, type RawFile } from './engine/ingest.ts'
-import { addDevices, removeDevice } from './projectData.ts'
+import { addDevices, confirmDeviceComplete, removeDevice } from './projectData.ts'
 import { PlatformTag } from './components.tsx'
 import type { TabProps } from './Project.tsx'
 import { fmtDate, go, Link, toast } from './ui.tsx'
@@ -32,6 +32,7 @@ async function readFiles(files: FileList | File[]): Promise<{ raw: RawFile[]; sk
 export default function Import({ project }: TabProps) {
   const [paste, setPaste] = useState('')
   const [preview, setPreview] = useState<Ingested[] | null>(null)
+  const [confirmed, setConfirmed] = useState<Record<number, boolean>>({})
   const [skipped, setSkipped] = useState<string[]>([])
   const [drag, setDrag] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -41,6 +42,7 @@ export default function Import({ project }: TabProps) {
     const items = raw.flatMap(splitConfigs).map(ingest).filter(i => i.text.trim())
     // Files that are clearly not configs (READMEs, .gitignore in an Oxidized repo) are listed but not imported.
     setPreview(items)
+    setConfirmed({})
     setSkipped(skip)
     if (!items.length) toast('Nothing that looks like a config was found', { tone: 'error' })
   }
@@ -49,10 +51,10 @@ export default function Import({ project }: TabProps) {
     try { const { raw, skipped: s } = await readFiles(files); stage(raw, s) } finally { setBusy(false) }
   }
   const commit = async () => {
-    const good = preview!.filter(i => i.ok)
+    const good = preview!.flatMap((i, k) => i.ok ? [{ ...i, ...(i.incomplete && confirmed[k] ? { confirmedComplete: true } : {}) }] : [])
     if (!good.length) return
     const r = await addDevices(project, good)
-    setPreview(null); setPaste('')
+    setPreview(null); setConfirmed({}); setPaste('')
     toast(`${r.added ? `Added ${r.added}` : ''}${r.added && r.replaced ? ', ' : ''}${r.replaced ? `replaced ${r.replaced}` : ''} device${good.length > 1 ? 's' : ''}`, { tone: 'ok' })
     go(`/app/p/${project.id}`)
   }
@@ -92,10 +94,11 @@ export default function Import({ project }: TabProps) {
           <ul className="validate">
             {preview.map((i, k) => {
               const replaces = project.devices.some(d => d.hostname.toLowerCase() === i.hostname.toLowerCase())
+              const isConfirmed = !!(i.incomplete && confirmed[k])
               return (
                 <li key={k} className={i.ok ? '' : 'bad'}>
                   <div className="row between wrap">
-                    <span className="row gap-sm"><strong className="mono">{i.hostname}</strong><PlatformTag p={i.platform} /><span className="muted small">{i.source} · {i.lines} lines</span></span>
+                    <span className="row gap-sm wrap"><strong className="mono">{i.hostname}</strong><PlatformTag p={i.platform} />{i.incomplete && (isConfirmed ? <span className="badge">Confirmed complete</span> : <span className="badge warn">Incomplete</span>)}<span className="muted small">{i.source} · {i.lines} lines</span></span>
                     <span className="small">{!i.ok ? <b className="error">Skipped</b> : replaces ? 'Replaces existing device' : 'New device'}</span>
                   </div>
                   {i.secrets.length > 0 && <p className="small muted">Masked: {summarizeSecrets(i.secrets)}; {i.secrets.filter(s => s.weak).length} weak.</p>}
@@ -103,6 +106,12 @@ export default function Import({ project }: TabProps) {
                     <ul className="issues">
                       {i.issues.filter(x => !/^Masked/.test(x.message)).slice(0, 12).map((x, j) => <li key={j} className={x.level}><span className="mono small">{x.line ? `line ${x.line}` : '—'}</span> {x.message}</li>)}
                     </ul>
+                  )}
+                  {i.ok && i.incomplete && (
+                    <label className="row gap-sm small confirm-complete">
+                      <input type="checkbox" checked={isConfirmed} onChange={e => setConfirmed(c => ({ ...c, [k]: e.target.checked }))} />
+                      <span>Confirm this config is complete (include in grade and fleet score)</span>
+                    </label>
                   )}
                 </li>
               )
@@ -121,13 +130,13 @@ export default function Import({ project }: TabProps) {
               <tbody>
                 {project.devices.map(d => (
                   <tr key={d.id}>
-                    <td className="mono small"><Link href={`/app/p/${project.id}/device/${encodeURIComponent(d.hostname)}`}>{d.hostname}</Link></td>
+                    <td className="mono small"><span className="row gap-sm wrap"><Link href={`/app/p/${project.id}/device/${encodeURIComponent(d.hostname)}`}>{d.hostname}</Link>{d.confirmedComplete ? <span className="badge">Confirmed complete</span> : d.incomplete ? <span className="badge warn">Incomplete</span> : null}</span></td>
                     <td>{PLATFORM_LABEL[d.platform]}</td>
                     <td className="small">{d.source}</td>
                     <td>{d.lines}</td>
                     <td className="small">{d.secrets.length} ({d.secrets.filter(s => s.weak).length} weak)</td>
                     <td className="small">{fmtDate(d.importedAt)}</td>
-                    <td><button type="button" className="btn danger-ghost sm" onClick={async () => { const undo = await removeDevice(project, d.id); toast(`Removed ${d.hostname}`, { undo: () => void undo() }) }}>Remove</button></td>
+                    <td className="row gap-sm">{d.incomplete && <button type="button" className="btn ghost sm" onClick={() => void confirmDeviceComplete(project, d.id, !d.confirmedComplete)}>{d.confirmedComplete ? 'Mark incomplete' : 'Confirm complete'}</button>}<button type="button" className="btn danger-ghost sm" onClick={async () => { const undo = await removeDevice(project, d.id); toast(`Removed ${d.hostname}`, { undo: () => void undo() }) }}>Remove</button></td>
                   </tr>
                 ))}
               </tbody>

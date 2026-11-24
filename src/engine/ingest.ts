@@ -1,7 +1,7 @@
 // Import: split pasted text or files into device configs, detect platform, mask secrets, and
 // produce a validation report with line numbers.
 
-import { looksSecret, maskSecrets, type MaskedSecret } from './mask.ts'
+import { looksSecret, maskSecrets, maskUnrecognisedLine, type MaskedSecret } from './mask.ts'
 import { detectPlatform, parse, type Platform } from './parse.ts'
 
 export interface RawFile { name: string; text: string }
@@ -16,6 +16,8 @@ export interface Ingested {
   secrets: MaskedSecret[]
   issues: Issue[]
   ok: boolean
+  incomplete?: boolean
+  confirmedComplete?: boolean
 }
 
 const START = /^(Building configuration\.\.\.|Current configuration : \d+ bytes|!Command: show running-config|: Saved|ASA Version \d|!RANCID-CONTENT-TYPE)/m
@@ -63,8 +65,9 @@ function fromAnsible(j: unknown, name: string): RawFile[] {
     const o = v as Record<string, unknown>
     const facts = (o.ansible_facts ?? o) as Record<string, unknown>
     // Module output uses "ansible_net_config"; the "ansible_facts" variable (e.g. "{{ ansible_facts | to_nice_json }}") drops the prefix.
-    const cfg = facts.ansible_net_config ?? facts.net_config ?? (o.config as unknown)
-    if (typeof cfg === 'string') { out.push({ name: String(facts.ansible_net_hostname ?? facts.net_hostname ?? label), text: cfg }); return }
+    const rawCfg = facts.ansible_net_config ?? facts.net_config ?? (o.config as unknown)
+    const cfg = typeof rawCfg === 'string' ? rawCfg : Array.isArray(rawCfg) && rawCfg.every(x => typeof x === 'string') ? rawCfg.join('\n') : null
+    if (cfg !== null) { out.push({ name: String(facts.ansible_net_hostname ?? facts.net_hostname ?? label), text: cfg }); return }
     if (Array.isArray(v)) v.forEach((x, i) => visit(x, `${label}[${i}]`))
     else for (const [k, x] of Object.entries(o)) if (x && typeof x === 'object') visit(x, k)
   }
@@ -77,15 +80,28 @@ export function looksLikeCisco(text: string) {
   return /^(hostname|switchname|interface|line vty|version \d|ASA Version|ip route|router |access-list|ip access-list|vlan \d|feature |snmp-server|logging |aaa )/m.test(text)
 }
 
+function isTruncatedConfig(text: string, platform: Platform, bannerOpen: boolean): boolean {
+  if (bannerOpen) return true
+  const hasEnd = /^\s*(: )?end\s*$/m.test(text)
+  const hasMore = /--More--|<--- More --->/.test(text)
+  const tail = text.split(/\r?\n/).slice(-5).join('\n')
+  if ((hasMore && !hasEnd) || /--More--|<--- More --->/.test(tail)) return true
+  if (platform !== 'ios' && platform !== 'iosxe') return false
+  if (hasEnd) return false
+  return /^(Building configuration\.\.\.|Current configuration : \d+ bytes|!RANCID-CONTENT-TYPE|\S+[#>]\s*(?:show|sh)\s+(?:run|running-config)|version\s+\d|boot-start-marker|hostname\s+\S+|service\s+|aaa\s+new-model)/m.test(text)
+}
+
 export function ingest(f: RawFile): Ingested {
   const issues: Issue[] = []
   const platform = detectPlatform(f.text)
-  const { text, secrets } = maskSecrets(f.text)
+  let { text, secrets } = maskSecrets(f.text)
   const c = parse(text, platform)
   const lines = text.split('\n').length
   if (!looksLikeCisco(f.text)) issues.push({ level: 'error', message: 'This does not look like a Cisco running-config (no hostname, interface or line commands found).' })
   if (!c.hostname) issues.push({ level: 'warn', message: 'No "hostname" line; the device will be named from the file name.' })
-  if (!/^\s*(: )?end\s*$/m.test(f.text) && platform !== 'nxos') issues.push({ level: 'warn', message: 'No final "end" line. The config may be truncated (common with terminal-length paging).' })
+  const hasUnclosedBanner = !!c.top.find(l => /^banner /.test(l.text) && l.children.length && !l.children[l.children.length - 1].text.includes(l.text.match(/^banner \S+ (\^C|.)/)?.[1] ?? '\u0000'))
+  const incomplete = isTruncatedConfig(f.text, platform, hasUnclosedBanner)
+  if (incomplete && !/^\s*(: )?end\s*$/m.test(f.text)) issues.push({ level: 'warn', message: 'No final "end" line. The config may be truncated (common with terminal-length paging).' })
   // Paging artefacts and console noise
   f.text.split(/\r?\n/).forEach((l, i) => {
     if (/--More--|<--- More --->/.test(l)) issues.push({ line: i + 1, level: 'warn', message: 'Pager prompt in the output. Run "terminal length 0" before "show running-config".' })
@@ -95,11 +111,22 @@ export function ingest(f: RawFile): Ingested {
   })
   const bannerOpen = c.top.find(l => /^banner /.test(l.text) && l.children.length && !l.children[l.children.length - 1].text.includes(l.text.match(/^banner \S+ (\^C|.)/)?.[1] ?? '\u0000'))
   if (bannerOpen) issues.push({ line: bannerOpen.n, level: 'warn', message: 'Banner delimiter never closes; the rest of the file was read as banner text.' })
-  // Safety net: anything that still looks like a secret after masking is flagged so it can be checked before sharing.
-  text.split('\n').forEach((l, i) => { if (!c.lines.some(x => x.n === i + 1 && x.banner) && looksSecret(l)) issues.push({ line: i + 1, level: 'warn', message: `Possible secret the masker did not recognise: "${l.trim().split(/\s+/).slice(0, 3).join(' ')} ...". Check before sharing.` }) })
+  // Fail closed: any non-banner line still looking like a secret after masking has its value masked and blocks import.
+  const closedBannerLines = new Set(c.lines.filter(x => x.banner && (!bannerOpen || x.n < bannerOpen.n)).map(x => x.n))
+  const outLines = text.split('\n')
+  let blockedSecret = false
+  outLines.forEach((l, i) => {
+    if (!closedBannerLines.has(i + 1) && looksSecret(l)) {
+      const masked = maskUnrecognisedLine(l)
+      outLines[i] = masked
+      blockedSecret = true
+      issues.push({ line: i + 1, level: 'error', message: `Possible secret the masker did not recognise: "${masked.trim().split(/\s+/).slice(0, 4).join(' ')} ...". Value masked and import blocked.` })
+    }
+  })
+  if (blockedSecret) text = outLines.join('\n')
   if (secrets.length) issues.push({ level: 'info', message: `Masked ${secrets.length} secret${secrets.length > 1 ? 's' : ''} (${summarizeSecrets(secrets)}). Only the type and whether it is weak are kept.` })
   const hostname = c.hostname || f.name.replace(/\.(txt|cfg|conf|config|log)$/i, '').replace(/[^\w.-]+/g, '-')
-  return { source: f.name, hostname, platform, text, lines, secrets, issues: issues.slice(0, 60), ok: !issues.some(i => i.level === 'error') }
+  return { source: f.name, hostname, platform, text, lines, secrets, issues: issues.slice(0, 60), ok: !issues.some(i => i.level === 'error'), ...(incomplete ? { incomplete: true } : {}) }
 }
 
 export function summarizeSecrets(s: MaskedSecret[]) {

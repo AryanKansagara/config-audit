@@ -35,9 +35,10 @@ export function snapshotNow(project: Project, ds: Dataset, audits: DeviceAudit[]
 }
 
 export default function ProjectView({ id, tab: rawTab, arg }: { id: string; tab: string; arg?: string }) {
-  const { loading, project, ds, update, audits, configs } = useProject(id)
+  const { loading, project, ds, legacyUnmasked, maskStoredCopy, update, audits, configs } = useProject(id)
   const tab = (rawTab === 'device' || TABS.some(t => t[0] === rawTab) ? rawTab : 'overview') as Tab
   const [help, setHelp] = useState(false)
+  const [maskBusy, setMaskBusy] = useState(false)
 
   useEffect(() => { if (project) document.title = `${project.name} · Config Audit` }, [project?.name])
 
@@ -72,11 +73,13 @@ export default function ProjectView({ id, tab: rawTab, arg }: { id: string; tab:
     <section className="page">
       <div className="proj-head">
         <div className="row gap">
-          {!empty && <ScoreRing score={fleet.score} grade={fleet.grade} size={76} label="Fleet score" />}
+          {!empty && (fleet.score !== null && fleet.grade !== null
+            ? <ScoreRing score={fleet.score} grade={fleet.grade} size={76} label="Fleet score" />
+            : <div className="ring-empty ring-incomplete" style={{ width: 76, height: 76 }} title="No fleet score: all devices are incomplete"><span>—</span></div>)}
           <div>
             <div className="eyebrow"><Link href="/app">Audits</Link></div>
-            <h1 className="row gap-sm wrap">{project.name} {project.sampleId && <SyntheticBadge id={project.sampleId} />}</h1>
-            {!empty && <p className="muted small" style={{ margin: 0 }}>{audits.length} device{audits.length > 1 ? 's' : ''} · {fleet.total} open findings · {fleet.critical} critical · {fleet.waived} waived</p>}
+            <h1 className="row gap-sm wrap">{project.name} {project.sampleId && <SyntheticBadge id={project.sampleId} />} {!empty && fleet.score === null && <span className="badge warn">Incomplete</span>}</h1>
+            {!empty && <p className="muted small" style={{ margin: 0 }}>{audits.length} device{audits.length > 1 ? 's' : ''}{fleet.incompleteCount ? ` (${fleet.incompleteCount} incomplete excluded from score)` : ''} · {fleet.total} open findings · {fleet.critical} critical · {fleet.waived} waived</p>}
           </div>
         </div>
         {!empty && (
@@ -87,7 +90,18 @@ export default function ProjectView({ id, tab: rawTab, arg }: { id: string; tab:
           </div>
         )}
       </div>
+      {!empty && fleet.incompleteCount > 0 && (
+        <div className="banner-warn">
+          {fleet.incompleteCount} device{fleet.incompleteCount > 1 ? 's look' : ' looks'} truncated and {fleet.incompleteCount > 1 ? 'are' : 'is'} marked <b>Incomplete</b> (no grade, excluded from the fleet score). Review or confirm completeness on the device page or <Link href={`/app/p/${id}/configs`}>Configs</Link>.
+        </div>
+      )}
       {project.dataMissing && <div className="banner-warn">This audit was synced from another device, but its configs were too large to sync. Findings and snapshots are here; re-import the configs on the Configs tab to re-run the audit.</div>}
+      {legacyUnmasked && (
+        <div className="banner-warn row between wrap gap-sm">
+          <span>This saved audit contains unmasked values from an earlier import. Nothing was deleted; values are masked in the viewer and blocked from sync and export.</span>
+          <button type="button" className="btn outline sm" disabled={maskBusy} onClick={() => { setMaskBusy(true); void maskStoredCopy().then(() => toast('Masked stored configs and snapshots', { tone: 'ok' })).finally(() => setMaskBusy(false)) }}>Mask stored copy</button>
+        </div>
+      )}
       <nav className="tabs" aria-label="Audit sections">
         {TABS.map(([t, l], i) => <Link key={t} href={`/app/p/${id}${t === 'overview' ? '' : '/' + t}`} aria-current={t === tab || (tab === 'device' && t === 'overview') ? 'page' : undefined} title={`${l} (${i + 1})`}>{l}{t === 'findings' && !empty ? <span className="count">{fleet.total}</span> : null}</Link>)}
       </nav>

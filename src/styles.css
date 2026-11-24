@@ -203,7 +203,8 @@ main { min-height: 70vh; }
 .ring-num strong { font-size: 1.9em; font-weight: 300; font-variant-numeric: tabular-nums; }
 .ring[style*='width: 64px'] .ring-num strong, .ring[style*='width: 72px'] .ring-num strong, .ring[style*='width: 76px'] .ring-num strong { font-size: 1.15rem; font-weight: 500; }
 .ring-num span { font-size: .72rem; font-weight: 700; color: var(--ink-3); margin-top: 3px; }
-.ring-empty { width: 64px; height: 64px; border-radius: 50%; border: 8px solid var(--line-2); display: grid; place-items: center; color: var(--ink-3); }
+.ring-empty { width: 64px; height: 64px; border-radius: 50%; border: 8px solid var(--line-2); display: grid; place-items: center; color: var(--ink-3); flex: none; }
+.ring-incomplete { border-style: dashed; border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); font-weight: 600; }
 
 /* Hero (midnight band as on cisco.com) */
 .hero { background: radial-gradient(900px 420px at 85% 0%, #0b4a8c 0%, transparent 60%), radial-gradient(700px 380px at 0% 100%, #063a5c 0%, transparent 60%), var(--midnight); color: #fff; overflow: hidden; }
@@ -421,6 +422,8 @@ main { min-height: 70vh; }
 .issues { list-style: none; padding: 0; margin: 8px 0 0; font-size: .85rem; }
 .issues li { padding: 2px 0; }
 .issues li.warn { color: var(--warn); } .issues li.error { color: var(--bad); } .issues li.info { color: var(--ink-3); }
+.confirm-complete { margin-top: 8px; cursor: pointer; }
+.confirm-complete input { width: auto; min-height: auto; accent-color: var(--accent); }
 
 /* Settings, docs */
 .inline-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 14px; }

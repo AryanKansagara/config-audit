@@ -16,6 +16,7 @@ export default function Report({ id }: { id: string }) {
   if (!project) return <section className="page narrow center"><h1>Audit not found</h1><Link href="/app" className="btn primary">All audits</Link></section>
   if (!audits.length) return <section className="page narrow center"><h1>No devices yet</h1><Link href={`/app/p/${id}/configs`} className="btn primary">Import configs</Link></section>
   const fleet = fleetScore(audits)
+  const scored = audits.filter(a => !a.incomplete && a.score !== null).sort((a, b) => a.score! - b.score!)
   const all = audits.flatMap(a => a.findings)
   const waived = all.filter(f => f.waived)
   const snaps = [...project.snapshots].sort((a, b) => a.at - b.at)
@@ -37,15 +38,18 @@ export default function Report({ id }: { id: string }) {
           <h1>{project.name} {project.sampleId && <SyntheticBadge id={project.sampleId} />}</h1>
           <p className="muted">{audits.length} devices · generated {fmtDate(Date.now())} · checks modelled on CIS Cisco IOS Benchmark and DISA STIG network device themes</p>
         </div>
-        <ScoreRing score={fleet.score} grade={fleet.grade} size={110} label="Fleet score" />
+        {fleet.score !== null && fleet.grade !== null
+          ? <ScoreRing score={fleet.score} grade={fleet.grade} size={110} label="Fleet score" />
+          : <div className="ring-empty ring-incomplete" style={{ width: 110, height: 110 }} aria-hidden="true"><span>—</span></div>}
       </header>
 
       <section>
         <h2>Summary</h2>
         <ul className="report-points">
           <li>{fleet.total} open findings: {fleet.critical} critical, {fleet.high} high, {fleet.medium} medium, {fleet.low} low. {fleet.waived} waived with a reason and an expiry date.</li>
-          <li>Lowest score: {[...audits].sort((a, b) => a.score - b.score)[0].host} ({[...audits].sort((a, b) => a.score - b.score)[0].score}/100).</li>
-          {cmp && <li>Since "{last!.label}" ({fmtDate(last!.at)}): {cmp.fixed.length} fixed, {cmp.added.length} new, {cmp.regressed.length} regressed; fleet score {last!.score} → {fleet.score}.</li>}
+          {scored.length > 0 && <li>Lowest score: {scored[0].host} ({scored[0].score}/100).</li>}
+          {fleet.incompleteCount > 0 && <li>{fleet.incompleteCount} incomplete device{fleet.incompleteCount > 1 ? 's' : ''} (may be truncated) excluded from grade and fleet score.</li>}
+          {cmp && <li>Since "{last!.label}" ({fmtDate(last!.at)}): {cmp.fixed.length} fixed, {cmp.added.length} new, {cmp.regressed.length} regressed; fleet score {last!.score ?? '—'} → {fleet.score ?? '—'}.</li>}
           {dr.length > 0 && <li>{dr.length} settings drift across devices: {dr.map(r => r.setting).join(', ')}.</li>}
         </ul>
       </section>
@@ -57,7 +61,7 @@ export default function Report({ id }: { id: string }) {
           <tbody>
             {audits.map(a => {
               const c = sevCounts(a.findings)
-              return <tr key={a.host}><td className="mono">{a.host}</td><td>{PLATFORM_LABEL[a.platform]} {a.inventory.version}</td><td><b>{a.score}</b></td><td>{a.grade}</td><td>{a.passed}/{a.evaluated}</td><td><SevBar counts={c} /><span className="small">{SEV_ORDER.map(s => `${c[s]} ${s}`).join(' · ')}</span></td></tr>
+              return <tr key={a.host}><td className="mono">{a.host} {a.incomplete && <span className="badge warn">Incomplete</span>}{a.confirmedComplete && <span className="badge">Confirmed complete</span>}</td><td>{PLATFORM_LABEL[a.platform]} {a.inventory.version}</td><td><b>{a.score ?? '—'}</b></td><td>{a.grade ?? '—'}</td><td>{a.passed}/{a.evaluated}</td><td><SevBar counts={c} /><span className="small">{SEV_ORDER.map(s => `${c[s]} ${s}`).join(' · ')}</span></td></tr>
             })}
           </tbody>
         </table>
@@ -65,7 +69,7 @@ export default function Report({ id }: { id: string }) {
 
       {audits.map(a => (
         <section key={a.host} className="report-device">
-          <h2 className="mono">{a.host} <span className="muted small">{a.score}/100</span></h2>
+          <h2 className="mono">{a.host} <span className="muted small">{a.incomplete || a.score === null ? 'Incomplete (not graded)' : `${a.score}/100`}{a.confirmedComplete ? ' · Confirmed complete' : ''}</span></h2>
           {a.findings.filter(f => !f.waived).length === 0 ? <p className="muted">No open findings.</p> : (
             <table className="tbl">
               <thead><tr><th>Severity</th><th>Rule</th><th>Finding</th><th>Where</th></tr></thead>

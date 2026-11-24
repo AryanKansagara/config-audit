@@ -39,6 +39,7 @@ login block-for 120 attempts 5 within 60
   const graded = await page.getByRole('img', { name: /score/i }).count()
   knownBug(graded > 0, 2)
   expect(graded, 'a truncated config was imported and given a score').toBe(0)
+  await expect(page.getByText('Incomplete', { exact: true }).first()).toBeVisible()
 })
 
 test('secrets from vtp, server-private, isis, nhrp, rsvp and ldp commands are not stored', async ({ page }) => {

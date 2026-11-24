@@ -6,7 +6,7 @@ import { parse, type Config } from './engine/parse.ts'
 import { SAMPLES } from './engine/samples.ts'
 import { getData, getDefaults, getProjects, putData, saveProject, useProjects, uuid, type Dataset, type Device, type Project } from './store.ts'
 
-const toDevice = (i: Ingested): Device => ({ id: uuid(), hostname: i.hostname, platform: i.platform, source: i.source, importedAt: Date.now(), lines: i.lines, secrets: i.secrets, issues: i.issues })
+const toDevice = (i: Ingested): Device => ({ id: uuid(), hostname: i.hostname, platform: i.platform, source: i.source, importedAt: Date.now(), lines: i.lines, secrets: i.secrets, issues: i.issues, ...(i.incomplete ? { incomplete: true } : {}), ...(i.confirmedComplete ? { confirmedComplete: true } : {}) })
 
 export function parseDevice(d: Device, text: string): Config {
   const c = parse(text, d.platform)
@@ -15,8 +15,14 @@ export function parseDevice(d: Device, text: string): Config {
 }
 
 export function runAudits(p: Project, ds: Dataset): { audits: DeviceAudit[]; configs: Config[] } {
-  const configs = p.devices.filter(d => ds[d.id] !== undefined).map(d => parseDevice(d, ds[d.id]))
-  return { configs, audits: configs.map(c => auditConfig(c, p.settings, p.waivers)) }
+  const included = p.devices.filter(d => ds[d.id] !== undefined)
+  const configs = included.map(d => parseDevice(d, ds[d.id]))
+  return { configs, audits: configs.map((c, k) => auditConfig(c, p.settings, p.waivers, undefined, { incomplete: included[k].incomplete, confirmedComplete: included[k].confirmedComplete })) }
+}
+
+export async function confirmDeviceComplete(p: Project, deviceId: string, confirmed: boolean): Promise<Project> {
+  const devices = p.devices.map(d => d.id === deviceId ? { ...d, confirmedComplete: confirmed ? true : undefined } : d)
+  return saveProject({ ...p, devices })
 }
 
 // One in-flight creation per sample, so a double click (or a re-run effect) never makes two copies.

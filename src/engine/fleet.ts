@@ -91,14 +91,20 @@ export function lineDiff(a: string[], b: string[]): { op: ' ' | '+' | '-'; text:
 
 // ---------- Snapshots ----------
 
-export interface SnapDevice { host: string; platform: string; score: number; findings: { key: string; rule: string; severity: string; title: string; target: string }[] }
-export interface Snapshot { id: string; label: string; at: number; score: number; devices: SnapDevice[]; /** masked configs by host; may be dropped for cloud sync when large */ configs?: Record<string, string> }
+const snapScore = (devices: DeviceAudit[]): number | null => {
+  const scored = devices.filter(d => !d.incomplete && d.score !== null)
+  return scored.length ? Math.round(scored.reduce((s, d) => s + d.score!, 0) / scored.length) : null
+}
+
+export interface SnapDevice { host: string; platform: string; score: number | null; incomplete?: boolean; confirmedComplete?: boolean; findings: { key: string; rule: string; severity: string; title: string; target: string }[] }
+export interface Snapshot { id: string; label: string; at: number; score: number | null; incompleteCount?: number; devices: SnapDevice[]; /** masked configs by host; may be dropped for cloud sync when large */ configs?: Record<string, string> }
 
 export function makeSnapshot(id: string, label: string, devices: DeviceAudit[], configs?: Record<string, string>, at = Date.now()): Snapshot {
   return {
     id, label, at,
-    score: devices.length ? Math.round(devices.reduce((s, d) => s + d.score, 0) / devices.length) : 0,
-    devices: devices.map(d => ({ host: d.host, platform: d.platform, score: d.score, findings: d.findings.filter(f => !f.waived).map(f => ({ key: f.key, rule: f.rule, severity: f.severity, title: f.title, target: f.target })) })),
+    score: snapScore(devices),
+    ...(devices.some(d => d.incomplete) ? { incompleteCount: devices.filter(d => d.incomplete).length } : {}),
+    devices: devices.map(d => ({ host: d.host, platform: d.platform, score: d.score, ...(d.incomplete ? { incomplete: true } : {}), ...(d.confirmedComplete ? { confirmedComplete: true } : {}), findings: d.findings.filter(f => !f.waived).map(f => ({ key: f.key, rule: f.rule, severity: f.severity, title: f.title, target: f.target })) })),
     configs,
   }
 }
@@ -108,7 +114,7 @@ export interface Comparison {
   added: SnapDevice['findings']
   regressed: SnapDevice['findings']
   unchanged: number
-  devices: { host: string; before?: number; after?: number }[]
+  devices: { host: string; before?: number | null; after?: number | null }[]
 }
 
 /**

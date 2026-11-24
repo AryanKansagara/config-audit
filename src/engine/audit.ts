@@ -1,5 +1,5 @@
 import { child, find, has, parse, type Config, type Platform } from './parse.ts'
-import { context, DEFAULT_SETTINGS, RULES, SEV_ORDER, SEV_WEIGHT, type Block, type Ctx, type Fix, type Rule, type Settings, type Severity } from './rules.ts'
+import { context, DEFAULT_SETTINGS, RULES, sanitizeFix, SEV_ORDER, SEV_WEIGHT, type Block, type Ctx, type Fix, type Rule, type Settings, type Severity } from './rules.ts'
 import type { AceIssue, Acl } from './acl.ts'
 
 export interface Waiver { key: string; reason: string; /** ISO date (YYYY-MM-DD); the waiver lapses after this day */ expires: string; by?: string; at: number }
@@ -55,7 +55,7 @@ export function auditConfig(c: Config, settings: Settings = DEFAULT_SETTINGS, wa
     const live = hits.map(h => {
       const key = `${host}|${r.id}|${h.target}`
       const wv = waivers[key]
-      return { key, host, rule: r.id, title: r.title, severity: r.severity, category: r.category, ref: r.ref, target: h.target, line: h.line, detail: h.detail, fix: h.fix, waived: waiverActive(wv, today) ? wv : undefined } as Finding
+      return { key, host, rule: r.id, title: r.title, severity: r.severity, category: r.category, ref: r.ref, target: h.target, line: h.line, detail: h.detail, fix: sanitizeFix(h.fix), waived: waiverActive(wv, today) ? wv : undefined } as Finding
     })
     findings.push(...live)
     if (live.some(f => !f.waived)) lost += w
@@ -181,10 +181,18 @@ export function remediationScript(host: string, platform: Platform, findings: Fi
   const end = platform === 'asa' ? ['write memory'] : platform === 'nxos' ? ['end', 'copy running-config startup-config'] : ['end', '! reload cancel', 'write memory']
   const applyLines = merge(ordered.flatMap(f => f.fix!.apply))
   const rollLines = merge([...ordered].reverse().flatMap(f => f.fix!.rollback))
-  const notes = [...new Set(live.map(f => f.fix!.note).filter(Boolean) as string[])]
+  const extraNotes: string[] = []
+  const scrub = (lines: string[]) => lines.map(line => {
+    if (/^\s*!/.test(line) || !/<masked(?::weak)?>/.test(line)) return line
+    if (!extraNotes.length) extraNotes.push('Replace <FILL-IN-SECRET> with the actual value from the device before pasting (the original value was masked on import).')
+    return line.replace(/<masked(?::weak)?>/g, '<FILL-IN-SECRET>')
+  })
+  const safeApply = scrub(applyLines)
+  const safeRoll = scrub(rollLines)
+  const notes = [...new Set([...live.map(f => f.fix!.note).filter(Boolean) as string[], ...extraNotes])]
   return {
-    apply: [...head('Remediation'), ...safety, 'configure terminal', ...applyLines, ...end].join('\n'),
-    rollback: [...head('Rollback'), 'configure terminal', ...rollLines, ...end.filter(l => !l.includes('reload'))].join('\n'),
+    apply: [...head('Remediation'), ...safety, 'configure terminal', ...safeApply, ...end].join('\n'),
+    rollback: [...head('Rollback'), 'configure terminal', ...safeRoll, ...end.filter(l => !l.includes('reload'))].join('\n'),
     notes,
     count: live.length,
   }

@@ -1,6 +1,7 @@
 // Fleet drift, config diffs and snapshot comparison.
 
 import { find, flatten, has, type Config } from './parse.ts'
+import { sanitizeConfigText } from './mask.ts'
 import type { DeviceAudit, Finding } from './audit.ts'
 
 // ---------- Drift: the same setting differing across devices ----------
@@ -94,13 +95,19 @@ export function lineDiff(a: string[], b: string[]): { op: ' ' | '+' | '-'; text:
 export interface SnapDevice { host: string; platform: string; score: number; findings: { key: string; rule: string; severity: string; title: string; target: string }[] }
 export interface Snapshot { id: string; label: string; at: number; score: number; devices: SnapDevice[]; /** masked configs by host; may be dropped for cloud sync when large */ configs?: Record<string, string> }
 
+const sanitizeSnapshot = (s: Snapshot): Snapshot => ({
+  ...s,
+  devices: s.devices.map(d => ({ ...d, findings: d.findings.map(f => ({ ...f, target: sanitizeConfigText(f.target) })) })),
+  configs: s.configs ? Object.fromEntries(Object.entries(s.configs).map(([k, v]) => [k, sanitizeConfigText(v)])) : undefined,
+})
+
 export function makeSnapshot(id: string, label: string, devices: DeviceAudit[], configs?: Record<string, string>, at = Date.now()): Snapshot {
-  return {
+  return sanitizeSnapshot({
     id, label, at,
     score: devices.length ? Math.round(devices.reduce((s, d) => s + d.score, 0) / devices.length) : 0,
     devices: devices.map(d => ({ host: d.host, platform: d.platform, score: d.score, findings: d.findings.filter(f => !f.waived).map(f => ({ key: f.key, rule: f.rule, severity: f.severity, title: f.title, target: f.target })) })),
     configs,
-  }
+  })
 }
 
 export interface Comparison {

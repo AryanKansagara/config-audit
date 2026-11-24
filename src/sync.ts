@@ -2,14 +2,42 @@
 import { useSyncExternalStore } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Snapshot } from './engine/fleet.ts'
-import { clearTombstones, getData, getProjects, loadProjects, onProjectChange, putData, saveProject, tombstones, type Dataset, type Project } from './store.ts'
+import { maskUnrecognisedLine, sanitizeConfigText } from './engine/mask.ts'
+import { clearTombstones, getData, getProjects, loadProjects, onProjectChange, putData, saveProject, tombstones, type Dataset, type Device, type Project } from './store.ts'
 
 export const APP_ID = 'config-audit'
 /** Masked configs above this stay on the device; device list, findings, waivers, settings and snapshot scores always sync. */
 export const RAW_SYNC_LIMIT = 1_500_000
 
-/** Snapshot payload for the cloud: drop the stored configs when they would push the row over the limit. */
-const forCloud = (s: Snapshot): Snapshot => { if (!s.configs) return s; return JSON.stringify(s.configs).length > RAW_SYNC_LIMIT ? { ...s, configs: undefined } : s }
+const sanitizeDataset = (ds: Dataset): Dataset =>
+  Object.fromEntries(Object.entries(ds).map(([k, v]) => [k, sanitizeConfigText(v)]))
+
+const sanitizeIssues = (issues: Device['issues']): Device['issues'] =>
+  issues.map(iss => {
+    if (!/Possible secret the masker did not recognise/.test(iss.message)) return iss
+    const m = iss.message.match(/"([^"]+)"/)
+    if (!m) return iss
+    const inner = m[1].replace(/\s+\.\.\.$/, '')
+    const masked = maskUnrecognisedLine(sanitizeConfigText(inner))
+    if (masked === inner) return iss
+    return { ...iss, message: iss.message.replace(m[1], `${masked} ...`) }
+  })
+
+const sanitizeDevices = (devices: Device[]): Device[] =>
+  devices.map(d => ({ ...d, issues: sanitizeIssues(d.issues) }))
+
+const sanitizeSnapshot = (s: Snapshot): Snapshot => ({
+  ...s,
+  devices: s.devices.map(d => ({ ...d, findings: d.findings.map(f => ({ ...f, target: sanitizeConfigText(f.target) })) })),
+  configs: s.configs ? Object.fromEntries(Object.entries(s.configs).map(([k, v]) => [k, sanitizeConfigText(v)])) : undefined,
+})
+
+/** Snapshot payload for the cloud: sanitize and drop stored configs when they would push the row over the limit. */
+const forCloud = (s: Snapshot): Snapshot => {
+  const safe = sanitizeSnapshot(s)
+  if (!safe.configs) return safe
+  return JSON.stringify(safe.configs).length > RAW_SYNC_LIMIT ? { ...safe, configs: undefined } : safe
+}
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined
@@ -139,17 +167,19 @@ async function doSync() {
       const cvs = cloudVersions.get(id) ?? []
       const cloudTime = cp ? Date.parse(cp.updated_at) : 0
       if (lp && (!cp || lp.updatedAt > cloudTime)) {
-        const ds = await getData(id)
+        const rawDs = await getData(id)
+        const ds = rawDs ? sanitizeDataset(rawDs) : undefined
         const raw = ds ? JSON.stringify(ds) : ''
         const { snapshots: _s, dataMissing: _m, ...meta } = lp
-        const payload: CloudData = { project: meta, ...(raw && raw.length <= RAW_SYNC_LIMIT ? { dataset: ds } : {}) }
+        const safeMeta = { ...meta, devices: sanitizeDevices(meta.devices) }
+        const payload: CloudData = { project: safeMeta, ...(raw && raw.length <= RAW_SYNC_LIMIT ? { dataset: ds } : {}) }
         const { error: e1 } = await c.from('projects').upsert({ id, app: APP_ID, name: lp.name, data: payload, updated_at: new Date(lp.updatedAt).toISOString() })
         if (e1) throw e1
       } else if (cp && (!lp || cloudTime > lp.updatedAt)) {
         const { project, dataset } = cp.data
         const hasLocal = !!(await getData(id))
-        if (dataset) await putData(id, dataset)
-        await saveProject({ ...project, id, name: cp.name, updatedAt: cloudTime, snapshots: lp?.snapshots ?? [], dataMissing: !dataset && !hasLocal }, { touch: false, silent: true })
+        if (dataset) await putData(id, sanitizeDataset(dataset))
+        await saveProject({ ...project, devices: sanitizeDevices(project.devices), id, name: cp.name, updatedAt: cloudTime, snapshots: lp?.snapshots ?? [], dataMissing: !dataset && !hasLocal }, { touch: false, silent: true })
       }
       // Snapshots: union by id in both directions.
       const now = getProjects().find(p => p.id === id)
@@ -193,6 +223,14 @@ export async function deleteAccount() {
 
 export async function exportAll(): Promise<Blob> {
   await loadProjects()
-  const list = await Promise.all(getProjects().map(async p => ({ ...p, configs: await getData(p.id) })))
+  const list = await Promise.all(getProjects().map(async p => {
+    const rawDs = await getData(p.id)
+    return {
+      ...p,
+      devices: sanitizeDevices(p.devices),
+      snapshots: p.snapshots.map(sanitizeSnapshot),
+      configs: rawDs ? sanitizeDataset(rawDs) : rawDs,
+    }
+  }))
   return new Blob([JSON.stringify({ app: APP_ID, exportedAt: new Date().toISOString(), projects: list }, null, 1)], { type: 'application/json' })
 }

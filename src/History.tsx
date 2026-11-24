@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { compareSnapshots, configDiff, makeSnapshot, type Snapshot } from './engine/fleet.ts'
+import { sanitizeConfigText } from './engine/mask.ts'
 import { parse } from './engine/parse.ts'
 import type { Severity } from './engine/rules.ts'
 import { Sev } from './components.tsx'
@@ -24,7 +25,7 @@ export default function History({ project, ds, audits, update }: TabProps) {
   const diff = useMemo(() => {
     const ta = A?.configs?.[h], tb = B?.configs?.[h]
     if (ta === undefined || tb === undefined) return null
-    return configDiff(parse(ta), parse(tb)).filter(g => g.added.length || g.removed.length)
+    return configDiff(parse(sanitizeConfigText(ta)), parse(sanitizeConfigText(tb))).filter(g => g.added.length || g.removed.length)
   }, [A, B, h])
 
   const remove = (s: Snapshot) => {

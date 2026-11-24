@@ -66,9 +66,15 @@ end
   await page.getByRole('button', { name: 'Check', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Validation report' })).toBeVisible()
   await importIfPossible(page)
+  const secrets = ['LEAKvtp', 'LEAKprivate', 'LEAKisis', 'LEAKnhrp', 'LEAKrsvp', 'LEAKldp']
   const stored = await dumpStorage(page)
-  knownBug(stored.includes('LEAK'), 4)
-  expect(stored).not.toContain('LEAK')
+  const body = await page.locator('body').innerText()
+  const leaked = secrets.some(s => stored.includes(s) || body.includes(s))
+  knownBug(leaked, 4)
+  for (const s of secrets) {
+    expect(stored).not.toContain(s)
+    expect(body).not.toContain(s)
+  }
 })
 
 test('the remediation script never contains a masked placeholder where a real value is needed', async ({ page }) => {

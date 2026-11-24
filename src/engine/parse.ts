@@ -40,6 +40,7 @@ const indentOf = (s: string) => {
 }
 
 export function parse(source: string, platform?: Platform): Config {
+  const resolvedPlatform = platform ?? detectPlatform(source)
   const raw = source.replace(/\r\n?/g, '\n').split('\n')
   const lines: Line[] = []
   const top: Line[] = []
@@ -73,7 +74,7 @@ export function parse(source: string, platform?: Platform): Config {
     lines.push(line)
     stack.push(line)
 
-    const b = !parent && trimmed.match(BANNER)
+    const b = !parent && resolvedPlatform !== 'asa' && trimmed.match(BANNER)
     if (b) {
       // IOS banners use a delimiter (^C, #, %, etc.). Body runs until the delimiter repeats.
       const rest = b[2]
@@ -85,7 +86,7 @@ export function parse(source: string, platform?: Platform): Config {
     }
   }
   const hostLine = top.find(l => /^(hostname|switchname)\s+\S+/.test(l.text))
-  return { lines, top, platform: platform ?? detectPlatform(source), hostname: hostLine ? hostLine.text.split(/\s+/)[1].replace(/^"|"$/g, '') : '', source }
+  return { lines, top, platform: resolvedPlatform, hostname: hostLine ? hostLine.text.split(/\s+/)[1].replace(/^"|"$/g, '') : '', source }
 }
 
 // ---------- Query helpers (ciscoconfparse-style) ----------

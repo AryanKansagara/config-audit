@@ -67,7 +67,7 @@ const PATTERNS: Pattern[] = [
   { re: new RegExp(`^(mpls\\s+ldp\\s+neighbor\\s+(?:vrf\\s+\\S+\\s+)?\\S+\\s+password\\s+)(${VAL})(.*)$`), kind: 'ldp', t: 0, v: 2, defaultType: '0' },
   { re: new RegExp(`^(password\\s+)([0-9])\\s+(${VAL})(.*)$`), kind: 'line', t: 2, v: 3 },
   { re: new RegExp(`^(password\\s+)(${VAL})(.*)$`), kind: 'line', t: 0, v: 2, defaultType: '0' },
-  { re: new RegExp(`^(snmp-server\\s+community\\s+)(${VAL})(.*)$`), kind: 'snmp', t: 0, v: 2, defaultType: 'community' },
+  { re: new RegExp(`^(snmp-server\\s+community\\s+(?:[0-9]\\s+(?=\\S+\\s+(?:RO|RW|ro|rw|view)\\b))?)(${VAL})(.*)$`), kind: 'snmp', t: 0, v: 2, defaultType: 'community' },
   // ASA: "snmp-server host <ifc> <host> [poll|trap] community [0|8] <string> [version 2c]"
   { re: new RegExp(`^(snmp-server\\s+host\\s+.*?\\bcommunity\\s+(?:[08]\\s+)?)(${VAL})(.*)$`), kind: 'snmp', t: 0, v: 2, defaultType: 'community' },
   { re: new RegExp(`^(snmp-server\\s+host\\s+\\S+(?:\\s+vrf\\s+\\S+)?(?:\\s+(?:traps|informs))?(?:\\s+version\\s+(?:1|2c))?\\s+)(${VAL})(.*)$`), kind: 'snmp', t: 0, v: 2, defaultType: 'community' },
@@ -100,8 +100,8 @@ const PATTERNS: Pattern[] = [
   { re: new RegExp(`^(neighbor\\s+\\S+\\s+password\\s+)(${VAL})(.*)$`), kind: 'bgp', t: 0, v: 2, defaultType: '0' },
   { re: new RegExp(`^(crypto\\s+isakmp\\s+key\\s+)([0-9])\\s+(${VAL})(.*)$`), kind: 'psk', t: 2, v: 3 },
   { re: new RegExp(`^(crypto\\s+isakmp\\s+key\\s+)(${VAL})(.*)$`), kind: 'psk', t: 0, v: 2, defaultType: '0' },
-  { re: new RegExp(`^((?:ikev1\\s+|ikev2\\s+(?:local|remote)-authentication\\s+)?pre-shared-key(?:\\s+(?:local|remote))?\\s+)([0-9])\\s+(${VAL})(.*)$`), kind: 'psk', t: 2, v: 3 },
-  { re: new RegExp(`^((?:ikev1\\s+|ikev2\\s+(?:local|remote)-authentication\\s+)?pre-shared-key(?:\\s+(?:local|remote))?\\s+)(${VAL})(.*)$`), kind: 'psk', t: 0, v: 2, defaultType: '0' },
+  { re: new RegExp(`^((?:ikev1\\s+|ikev2\\s+(?:local|remote)-authentication\\s+)?pre-shared-key(?:\\s+(?:local|remote))?\\s+(?:hex\\s+)?)([0-9])\\s+(${VAL})(.*)$`), kind: 'psk', t: 2, v: 3 },
+  { re: new RegExp(`^((?:ikev1\\s+|ikev2\\s+(?:local|remote)-authentication\\s+)?pre-shared-key(?:\\s+(?:local|remote))?\\s+(?:hex\\s+)?)(${VAL})(.*)$`), kind: 'psk', t: 0, v: 2, defaultType: '0' },
   { re: new RegExp(`^(failover\\s+key\\s+(?:hex\\s+)?)([0-9])\\s+(${VAL})(.*)$`), kind: 'psk', t: 2, v: 3 },
   { re: new RegExp(`^(failover\\s+key\\s+(?:hex\\s+)?)(${VAL})(.*)$`), kind: 'psk', t: 0, v: 2, defaultType: '0' },
   { re: new RegExp(`^(passwd\\s+)(${VAL})(\\s+(?:pbkdf2|encrypted))?(.*)$`), kind: 'enable', t: 0, v: 2, defaultType: '0' },
@@ -185,6 +185,40 @@ const indentOf = (s: string) => {
   return i
 }
 
+// Second pass, run on every line after the patterns above (they replace at most one value per line and skip comments and
+// "no" lines). Each entry keeps group 1 and replaces group 2; a value that is already masked is left alone.
+const LATE: RegExp[] = [
+  /(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]*:)([^\s@/]+)(?=@)/gi, // credentials in a URL
+  new RegExp(`(\\b(?:password|secret)\\s+[0-9]\\s+)(${VAL})`, 'gi'), // any further "password 0 X" / "secret 5 X" on the line
+  new RegExp(`(\\bkey\\s+config-key\\s+\\S+\\s+)(${VAL})`, 'gi'),
+  new RegExp(`(\\bauthentication\\s+mode\\s+hmac-sha-256\\s+(?:[0-9]\\s+)?)(${VAL})`, 'gi'),
+  new RegExp(`(\\bmessage-digest-key\\s+\\d+\\s+\\S+\\s+(?:[0-9]\\s+)?)(${VAL})`, 'gi'),
+  new RegExp(`(\\bspi\\s+\\d+\\s+(?:esp\\s+(?:aes-cbc\\s+\\d+|3des|des)\\s+|md5\\s+|sha1\\s+)(?:[0-9]\\s+)?)(${VAL})`, 'gi'),
+  new RegExp(`(\\bspi\\s+\\d+\\s+esp\\s+(?:null|\\S+(?:\\s+\\d+)?(?:\\s+[0-9])?\\s+\\S+)\\s+(?:md5|sha1)\\s+(?:[0-9]\\s+)?)(${VAL})`, 'gi'),
+  new RegExp(`(^\\s+authentication\\s+text\\s+)(${VAL})`, 'gi'),
+  new RegExp(`(\\bkey-octet-string\\s+(?:[0-9]\\s+)?)(${VAL})`, 'gi'),
+  new RegExp(`(\\bsnmp\\s+mib\\s+community-map\\s+)(${VAL})`, 'gi'),
+  new RegExp(`(\\bidtoken\\s+)(${VAL})`, 'gi'),
+  new RegExp(`(\\bevent\\s+manager\\s+environment\\s+\\S*(?:pw|pass|secret|key|token)\\S*\\s+)(.+)`, 'gi'),
+  new RegExp(`(\\b(?:password|passwd|passphrase|secret|key|token)=)(${VAL})`, 'gi'),
+  new RegExp(`(^aaa-server\\s+\\S+\\s+(?:\\(\\S+\\)\\s+)?host\\s+\\S+\\s+)(?!timeout\\b)(${VAL})`, 'gi'),
+]
+// Free text and negated commands: not configuration, but people leave passwords in them.
+const FREE_TEXT = /^\s*(?:!|:|no\s|description\s|remark\s|.*\sremark\s)/i
+const FREE_SECRET = new RegExp(`(\\b(?:password|passwd|passphrase|secret|pre-shared-key|snmp-server\\s+community)\\b(?:\\s*[:=]\\s*|\\s+)(?:is\\s+)?(?:[0-9]\\s+)?)(${VAL})`, 'gi')
+
+function maskLate(line: string, onMask: () => void): string {
+  const rep = (_all: string, keep: string, v: string) => {
+    if (!v || v.startsWith('<masked')) return keep + v
+    onMask()
+    return keep + MASK
+  }
+  let out = line
+  for (const re of LATE) out = out.replace(re, rep)
+  if (FREE_TEXT.test(out)) out = out.replace(FREE_SECRET, rep)
+  return out
+}
+
 /** Masks secrets in a config. Returns the masked text plus a list of what was masked (never the values). */
 export function maskSecrets(text: string): { text: string; secrets: MaskedSecret[] } {
   const secrets: MaskedSecret[] = []
@@ -192,11 +226,13 @@ export function maskSecrets(text: string): { text: string; secrets: MaskedSecret
   const asa = isAsaConfig(normalized)
   const lines = normalized.split('\n')
   const stack: { indent: number; text: string }[] = []
+  const bannerLines = new Set<number>()
   let bannerEnd: string | null = null
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]
     if (bannerEnd !== null) {
+      bannerLines.add(i)
       if (raw.includes(bannerEnd)) bannerEnd = null
       continue
     }
@@ -296,6 +332,10 @@ export function maskSecrets(text: string): { text: string; secrets: MaskedSecret
       break
     }
     i = endIdx
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (bannerLines.has(i)) continue
+    lines[i] = maskLate(lines[i], () => secrets.push({ line: i + 1, kind: 'other', type: '0', weak: false, reason: 'Other secret value' }))
   }
   return { text: lines.join('\n'), secrets }
 }

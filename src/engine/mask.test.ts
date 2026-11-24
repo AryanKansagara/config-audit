@@ -185,3 +185,21 @@ test('Ansible JSON imports, snapshots, and existing fixtures mask cleanly with z
   for (const f of SAMPLES[1].files) assert.equal(ingest(f).ok, true, f.name)
   assert.equal(looksSecret('ntp server 10.0.50.123 key 1 prefer'), false)
 })
+
+test('second pass: further secrets on a line, URLs, comments and less common keys are masked, and it is idempotent', () => {
+  const lines = [
+    'username bob privilege 15 password 0 LEAKa secret 5 LEAKb', 'key config-key password-encrypt LEAK', ' authentication mode hmac-sha-256 0 LEAK',
+    ' area 1 virtual-link 192.0.2.1 message-digest-key 1 md5 7 LEAK', ' ospfv3 authentication ipsec spi 500 sha1 LEAK',
+    ' ipv6 ospf encryption ipsec spi 500 esp aes-cbc 128 LEAK sha1 LEAK', ' authentication text LEAK', ' path ftp://user:LEAK@192.0.2.1/cfg',
+    ' pre-shared-key hex LEAK', ' key-octet-string 7 LEAK cryptographic-algorithm AES_128_CMAC', 'snmp-server community 7 LEAK RO',
+    'snmp mib community-map LEAK engineid 1', 'license smart register idtoken LEAK', 'event manager environment _pw LEAK two', ' management-interface key=LEAK',
+    'aaa-server X (inside) host 192.0.2.1 LEAK', ' description old password LEAK', ' remark secret: LEAK', '! enable secret LEAK', 'no username bob password 0 LEAK',
+  ]
+  for (const l of lines) {
+    const once = maskSecrets(`hostname R1\n${l}\nend\n`).text
+    assert.doesNotMatch(once, /LEAK/, l)
+    assert.equal(maskSecrets(once).text, once, l)
+  }
+  const keep = 'hostname R1\nno service password-encryption\nservice password-encryption\nno enable password\nno ip http server\nip ospf authentication message-digest\naaa-server X protocol radius\naaa-server X (inside) host 192.0.2.1\nsecurity passwords min-length 10\nip ssh version 2\nend\n'
+  assert.equal(maskSecrets(keep).text, keep)
+})

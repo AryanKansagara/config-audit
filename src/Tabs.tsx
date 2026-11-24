@@ -36,14 +36,16 @@ function Overview({ project, audits, configs }: TabProps) {
   return (
     <div className="stack">
       <div className="scorecards">
-        {[...audits].sort((a, b) => a.score - b.score).map(a => (
+        {[...audits].sort((a, b) => (a.score ?? 999) - (b.score ?? 999)).map(a => (
           <Link key={a.host} href={devHref(project.id, a.host)} className="scorecard">
-            <ScoreRing score={a.score} grade={a.grade} size={72} label={`${a.host} score`} />
+            {a.score !== null && a.grade !== null
+              ? <ScoreRing score={a.score} grade={a.grade} size={72} label={`${a.host} score`} />
+              : <div className="ring-empty ring-incomplete" style={{ width: 72, height: 72 }} aria-hidden="true"><span>—</span></div>}
             <div className="scorecard-body">
               <strong>{a.host}</strong>
-              <span className="row gap-sm"><PlatformTag p={a.platform} /><span className="muted small">{a.inventory.version && `v${a.inventory.version}`}</span></span>
+              <span className="row gap-sm wrap"><PlatformTag p={a.platform} />{a.incomplete && <span className="badge warn">Incomplete</span>}{a.confirmedComplete && <span className="badge">Confirmed complete</span>}<span className="muted small">{a.inventory.version && `v${a.inventory.version}`}</span></span>
               <SevBar counts={sevCounts(a.findings)} />
-              <span className="muted small">{a.findings.filter(f => !f.waived).length} open · {a.passed}/{a.evaluated} checks pass</span>
+              <span className="muted small">{a.incomplete ? 'Not graded · excluded from fleet score' : `${a.findings.filter(f => !f.waived).length} open · ${a.passed}/${a.evaluated} checks pass`}</span>
             </div>
           </Link>
         ))}

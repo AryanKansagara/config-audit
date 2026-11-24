@@ -3,6 +3,7 @@ import { auditConfig, remediationScript } from './engine/audit.ts'
 import { PLATFORM_LABEL } from './engine/ingest.ts'
 import { parse } from './engine/parse.ts'
 import { applyBlocks } from './engine/simulate.ts'
+import { confirmDeviceComplete } from './projectData.ts'
 import { ConfigView, ScoreRing, ScriptBlock, SevBar, sevCounts } from './components.tsx'
 import type { TabProps } from './Project.tsx'
 import { FindingRow } from './Tabs.tsx'
@@ -19,7 +20,7 @@ export default function DeviceView({ project, ds, audits, update, arg }: TabProp
 
   const script = useMemo(() => a ? remediationScript(a.host, a.platform, a.findings) : null, [a])
   const after = useMemo(() => {
-    if (!a || !dev) return null
+    if (!a || !dev || a.incomplete || a.score === null) return null
     const fixed = applyBlocks(text, a.findings.filter(f => !f.waived).flatMap(f => f.fix?.apply ?? []))
     const c = parse(fixed, dev.platform)
     if (!c.hostname) c.hostname = dev.hostname
@@ -48,13 +49,27 @@ export default function DeviceView({ project, ds, audits, update, arg }: TabProp
   return (
     <div className="stack">
       <div className="device-head">
-        <ScoreRing score={a.score} grade={a.grade} size={88} label={`${a.host} score`} />
+        {a.score !== null && a.grade !== null
+          ? <ScoreRing score={a.score} grade={a.grade} size={88} label={`${a.host} score`} />
+          : <div className="ring-empty ring-incomplete" style={{ width: 88, height: 88 }} aria-hidden="true"><span>—</span></div>}
         <div>
-          <h2 className="mono">{a.host}</h2>
+          <h2 className="row gap-sm wrap"><span className="mono">{a.host}</span>{a.incomplete && <span className="badge warn">Incomplete</span>}{a.confirmedComplete && <span className="badge">Confirmed complete</span>}</h2>
           <p className="muted small">{PLATFORM_LABEL[a.platform]}{a.inventory.version ? ` ${a.inventory.version}` : ''} · {dev.lines} lines · imported {new Date(dev.importedAt).toLocaleDateString()} from {dev.source} · {dev.secrets.length} secrets masked ({dev.secrets.filter(s => s.weak).length} weak)</p>
           <SevBar counts={sevCounts(a.findings)} />
+          {dev.incomplete && (
+            <div className="row gap-sm wrap" style={{ marginTop: 6 }}>
+              {a.incomplete ? (
+                <>
+                  <span className="muted small">May be truncated — not graded and excluded from fleet score.</span>
+                  <button type="button" className="btn outline sm" onClick={() => void confirmDeviceComplete(project, dev.id, true)}>Confirm config is complete</button>
+                </>
+              ) : (
+                <button type="button" className="btn ghost xs" onClick={() => void confirmDeviceComplete(project, dev.id, false)}>Mark incomplete</button>
+              )}
+            </div>
+          )}
         </div>
-        {after && after.score > a.score && <div className="after"><span className="muted small">After the script</span><ScoreRing score={after.score} grade={after.grade} size={64} label="Projected score after remediation" /></div>}
+        {after && a.score !== null && after.score > a.score && <div className="after"><span className="muted small">After the script</span><ScoreRing score={after.score} grade={after.grade} size={64} label="Projected score after remediation" /></div>}
       </div>
       <div className="device-grid">
         <ConfigView text={text} findings={a.findings} selected={focus} onSelect={f => { setSel(f.key); setView('findings') }} maxHeight="72vh" />

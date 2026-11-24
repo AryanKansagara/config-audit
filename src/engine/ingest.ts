@@ -16,6 +16,8 @@ export interface Ingested {
   secrets: MaskedSecret[]
   issues: Issue[]
   ok: boolean
+  incomplete?: boolean
+  confirmedComplete?: boolean
 }
 
 const START = /^(Building configuration\.\.\.|Current configuration : \d+ bytes|!Command: show running-config|: Saved|ASA Version \d|!RANCID-CONTENT-TYPE)/m
@@ -78,6 +80,17 @@ export function looksLikeCisco(text: string) {
   return /^(hostname|switchname|interface|line vty|version \d|ASA Version|ip route|router |access-list|ip access-list|vlan \d|feature |snmp-server|logging |aaa )/m.test(text)
 }
 
+function isTruncatedConfig(text: string, platform: Platform, bannerOpen: boolean): boolean {
+  if (bannerOpen) return true
+  const hasEnd = /^\s*(: )?end\s*$/m.test(text)
+  const hasMore = /--More--|<--- More --->/.test(text)
+  const tail = text.split(/\r?\n/).slice(-5).join('\n')
+  if ((hasMore && !hasEnd) || /--More--|<--- More --->/.test(tail)) return true
+  if (platform !== 'ios' && platform !== 'iosxe') return false
+  if (hasEnd) return false
+  return /^(Building configuration\.\.\.|Current configuration : \d+ bytes|!RANCID-CONTENT-TYPE|\S+[#>]\s*(?:show|sh)\s+(?:run|running-config)|version\s+\d|boot-start-marker|hostname\s+\S+|service\s+|aaa\s+new-model)/m.test(text)
+}
+
 export function ingest(f: RawFile): Ingested {
   const issues: Issue[] = []
   const platform = detectPlatform(f.text)
@@ -86,7 +99,9 @@ export function ingest(f: RawFile): Ingested {
   const lines = text.split('\n').length
   if (!looksLikeCisco(f.text)) issues.push({ level: 'error', message: 'This does not look like a Cisco running-config (no hostname, interface or line commands found).' })
   if (!c.hostname) issues.push({ level: 'warn', message: 'No "hostname" line; the device will be named from the file name.' })
-  if (!/^\s*(: )?end\s*$/m.test(f.text) && platform !== 'nxos') issues.push({ level: 'warn', message: 'No final "end" line. The config may be truncated (common with terminal-length paging).' })
+  const hasUnclosedBanner = !!c.top.find(l => /^banner /.test(l.text) && l.children.length && !l.children[l.children.length - 1].text.includes(l.text.match(/^banner \S+ (\^C|.)/)?.[1] ?? '\u0000'))
+  const incomplete = isTruncatedConfig(f.text, platform, hasUnclosedBanner)
+  if (incomplete && !/^\s*(: )?end\s*$/m.test(f.text)) issues.push({ level: 'warn', message: 'No final "end" line. The config may be truncated (common with terminal-length paging).' })
   // Paging artefacts and console noise
   f.text.split(/\r?\n/).forEach((l, i) => {
     if (/--More--|<--- More --->/.test(l)) issues.push({ line: i + 1, level: 'warn', message: 'Pager prompt in the output. Run "terminal length 0" before "show running-config".' })
@@ -111,7 +126,7 @@ export function ingest(f: RawFile): Ingested {
   if (blockedSecret) text = outLines.join('\n')
   if (secrets.length) issues.push({ level: 'info', message: `Masked ${secrets.length} secret${secrets.length > 1 ? 's' : ''} (${summarizeSecrets(secrets)}). Only the type and whether it is weak are kept.` })
   const hostname = c.hostname || f.name.replace(/\.(txt|cfg|conf|config|log)$/i, '').replace(/[^\w.-]+/g, '-')
-  return { source: f.name, hostname, platform, text, lines, secrets, issues: issues.slice(0, 60), ok: !issues.some(i => i.level === 'error') }
+  return { source: f.name, hostname, platform, text, lines, secrets, issues: issues.slice(0, 60), ok: !issues.some(i => i.level === 'error'), ...(incomplete ? { incomplete: true } : {}) }
 }
 
 export function summarizeSecrets(s: MaskedSecret[]) {

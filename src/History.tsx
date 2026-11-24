@@ -48,7 +48,7 @@ export default function History({ project, ds, audits, update }: TabProps) {
               <div key={s.id} className="snap">
                 <strong>{s.label}</strong>
                 <span className="muted small">{fmtDate(s.at)} · {s.devices.length} devices</span>
-                <span className="snap-score">{s.score}</span>
+                <span className="snap-score">{s.score ?? '—'}</span>
                 <button type="button" className="linkish small danger" onClick={() => remove(s)} aria-label={`Delete snapshot ${s.label}`}>Delete</button>
               </div>
             ))}
@@ -69,12 +69,12 @@ export default function History({ project, ds, audits, update }: TabProps) {
                 <div className="bad"><strong>{cmp.added.length}</strong><span>new</span></div>
                 <div className="warn"><strong>{cmp.regressed.length}</strong><span>regressed</span></div>
                 <div><strong>{cmp.unchanged}</strong><span>unchanged</span></div>
-                <div><strong>{A!.score} → {B!.score}</strong><span>fleet score</span></div>
+                <div><strong>{A!.score ?? '—'} → {B!.score ?? '—'}</strong><span>fleet score</span></div>
               </div>
               <div className="table-wrap">
                 <table className="tbl">
                   <thead><tr><th>Device</th><th>Before</th><th>After</th><th>Change</th></tr></thead>
-                  <tbody>{cmp.devices.map(d => <tr key={d.host}><td className="mono small">{d.host}</td><td>{d.before ?? '—'}</td><td>{d.after ?? '—'}</td><td className={d.before !== undefined && d.after !== undefined ? d.after > d.before ? 'pos' : d.after < d.before ? 'neg' : '' : ''}>{d.before !== undefined && d.after !== undefined ? (d.after - d.before > 0 ? '+' : '') + (d.after - d.before) : d.before === undefined ? 'added' : 'removed'}</td></tr>)}</tbody>
+                  <tbody>{cmp.devices.map(d => <tr key={d.host}><td className="mono small">{d.host}</td><td>{d.before ?? '—'}</td><td>{d.after ?? '—'}</td><td className={d.before != null && d.after != null ? d.after > d.before ? 'pos' : d.after < d.before ? 'neg' : '' : ''}>{d.before != null && d.after != null ? (d.after - d.before > 0 ? '+' : '') + (d.after - d.before) : d.before === undefined ? 'added' : d.after === undefined ? 'removed' : 'incomplete'}</td></tr>)}</tbody>
                 </table>
               </div>
               <div className="grid-3">

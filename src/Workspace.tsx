@@ -90,7 +90,7 @@ function ProjectCard({ p }: { p: Project }) {
         {p.sampleId && <SyntheticBadge id={p.sampleId} />}
       </div>
       <div className="row gap">
-        {last ? <ScoreRing score={last.score} size={64} label="Last snapshot score" /> : <div className="ring-empty" aria-hidden="true">—</div>}
+        {last && last.score !== null ? <ScoreRing score={last.score} size={64} label="Last snapshot score" /> : <div className="ring-empty" aria-hidden="true">—</div>}
         <dl className="mini-stats">
           <div><dt>Devices</dt><dd>{p.devices.length}</dd></div>
           <div><dt>Snapshots</dt><dd>{p.snapshots.length}</dd></div>

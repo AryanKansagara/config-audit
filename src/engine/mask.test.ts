@@ -203,3 +203,11 @@ test('second pass: further secrets on a line, URLs, comments and less common key
   const keep = 'hostname R1\nno service password-encryption\nservice password-encryption\nno enable password\nno ip http server\nip ospf authentication message-digest\naaa-server X protocol radius\naaa-server X (inside) host 192.0.2.1\nsecurity passwords min-length 10\nip ssh version 2\nend\n'
   assert.equal(maskSecrets(keep).text, keep)
 })
+
+test('bare NX-OS hsrp keys and keys written in remarks are masked; ordinary authentication lines are not', () => {
+  const t = 'hostname R1\ninterface Vlan1\n  hsrp 1\n    authentication LEAK\n    priority 110\n  ip address 192.0.2.1/24\nip access-list extended A\n remark key LEAK\nrouter ospf 1\n area 0 authentication message-digest\ncrypto isakmp policy 1\n authentication pre-share\nkey chain K\nend\n'
+  const once = maskSecrets(t).text
+  assert.doesNotMatch(once, /LEAK/)
+  for (const keep of [' area 0 authentication message-digest', ' authentication pre-share', 'key chain K', '    priority 110']) assert.ok(once.includes(keep), keep)
+  assert.equal(maskSecrets(once).text, once)
+})

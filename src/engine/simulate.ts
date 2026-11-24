@@ -13,9 +13,11 @@ export function asShown(cmd: string): string {
   return cmd
     .replace(/^enable algorithm-type scrypt secret \S+$/, 'enable secret 9 <masked>')
     .replace(/^username (\S+)( privilege \d+)? algorithm-type scrypt secret \S+$/, 'username $1$2 secret 9 <masked>')
-    .replace(/<(NEW-[A-Z-]+|[A-Z]+-KEY|NTP-KEY|BGP-KEY|EIGRP-KEY)>/g, '<masked>')
+    .replace(/<(?:(?:NEW|OLD|EXISTING|FILL-IN)-[A-Z0-9-]+|[A-Z0-9-]+-KEY)>/g, '<masked>')
     .replace(/^banner (login|motd) \^C(.*)\^C$/, 'banner $1 ^C$2^C')
 }
+
+const normMask = (s: string) => s.replace(/<masked:weak>/g, '<masked>')
 
 interface Node { text: string; children: Node[] }
 
@@ -68,8 +70,11 @@ export function applyBlocks(text: string, blocks: Block[]): string {
       const target: Node[] = nested && lastTop ? lastTop.children : level
       const insert = (n: Node) => { if (target === root) root.splice(endIdx(), 0, n); else target.push(n) }
       if (cmd.startsWith('no ') && !nested) {
-        const what = cmd.slice(3)
-        const idx = target.findIndex(x => x.text === what || x.text.startsWith(what + ' ') && !/^(ip access-list|access-list \S+ \S+ .*|interface)/.test(what))
+        const what = normMask(cmd.slice(3))
+        const idx = target.findIndex(x => {
+          const nx = normMask(x.text)
+          return nx === what || nx.startsWith(what + ' ') && !/^(ip access-list|access-list \S+ \S+ .*|interface)/.test(what)
+        })
         if (idx >= 0) { target.splice(idx, 1); lastTop = null; continue }
         if (!target.some(x => x.text === cmd)) insert({ text: cmd, children: [] })
         continue
@@ -78,7 +83,10 @@ export function applyBlocks(text: string, blocks: Block[]): string {
       const noIdx = target.findIndex(x => x.text === `no ${cmd}`)
       if (noIdx >= 0) target.splice(noIdx, 1)
       const k = keyOf(cmd)
-      const existing: Node | undefined = target.find(x => x.text === cmd) ?? (k ? target.find(x => keyOf(x.text) === k) : undefined)
+      const snmpM = cmd.match(/^snmp-server community (\S+) (RO|RW) \S+$/)
+      const existing: Node | undefined = target.find(x => x.text === cmd)
+        ?? (k ? target.find(x => keyOf(x.text) === k) : undefined)
+        ?? (snmpM ? target.find(x => new RegExp(`^snmp-server community ${snmpM[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (?:view \\S+ )?(?:RO|RW)$`).test(x.text)) : undefined)
       if (existing) { existing.text = cmd; lastTop = existing; continue }
       const n: Node = { text: cmd, children: [] }
       insert(n)

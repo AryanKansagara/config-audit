@@ -101,20 +101,66 @@ export function netParts(cidr: string, kind: 'wildcard' | 'mask') {
 const mgmtAcl = (name: string, nets: string[]) => [`ip access-list standard ${name}`, ...nets.map(n => ` permit ${netParts(n, 'wildcard')}`), ' deny any log']
 const aclBlock = (name: string, nets: string[]): Block => ({ parents: [], cmds: mgmtAcl(name, nets) })
 
+const MASK_TOKEN_RE = /<masked(?::weak)?>/g
+const HAS_MASK_RE = /<masked(?::weak)?>/
+
+export function sanitizeFix(fix: Fix): Fix
+export function sanitizeFix(fix: Fix | undefined): Fix | undefined
+export function sanitizeFix(fix: Fix | undefined): Fix | undefined {
+  if (!fix) return fix
+  let replaced = false
+  const cleanBlock = (b: Block): Block => ({
+    parents: b.parents.map(p => {
+      if (!HAS_MASK_RE.test(p)) return p
+      replaced = true
+      return p.replace(MASK_TOKEN_RE, '<FILL-IN-SECRET>')
+    }),
+    cmds: b.cmds.map(cmd => {
+      if (/^\s*!/.test(cmd) || !HAS_MASK_RE.test(cmd)) return cmd
+      replaced = true
+      return cmd.replace(MASK_TOKEN_RE, '<FILL-IN-SECRET>')
+    }),
+  })
+  const apply = fix.apply.map(cleanBlock)
+  const rollback = fix.rollback.map(cleanBlock)
+  if (!replaced) return fix
+  const extra = 'Replace <FILL-IN-SECRET> with the actual value from the device before pasting (the original value was masked on import).'
+  const note = fix.note ? (fix.note.includes('<FILL-IN-SECRET>') ? fix.note : `${fix.note} ${extra}`) : extra
+  return { ...fix, apply, rollback, note }
+}
+
+function snmpCommunityToken(c: Config, l: Line, rw: boolean, weak: boolean): string {
+  const sameRole = find(c, /^snmp-server community /).filter(x => (/\b(RW|rw)\b|group network-admin/.test(x.text)) === rw)
+  const prefix = weak ? 'OLD-COMMUNITY' : 'EXISTING-COMMUNITY'
+  const role = rw ? 'RW' : 'RO'
+  const suffix = sameRole.length > 1 ? `-L${l.n}` : ''
+  return `<${prefix}-${role}${suffix}>`
+}
+
 /** One fix per community line, shared by SNMP-01/02/03 so the script never fights itself. */
 function snmpFix(c: Config, s: Settings, l: Line): Fix {
   const define = !c.lines.some(x => x.text === `ip access-list standard ${s.snmpAcl}`)
   const t = l.text.split(/\s+/)
   const weak = /<masked:weak>/.test(l.text)
+  const hasMask = HAS_MASK_RE.test(l.text)
   const rw = /\b(RW|rw)\b|group network-admin/.test(l.text)
-  const value = weak ? '<NEW-LONG-RANDOM-COMMUNITY>' : t[2]
+  const oldToken = hasMask ? snmpCommunityToken(c, l, rw, weak) : t[2]
+  const oldLine = hasMask ? l.text.replace(MASK_TOKEN_RE, oldToken) : l.text
+  const value = weak ? '<NEW-LONG-RANDOM-COMMUNITY>' : oldToken
   const cmds = c.platform === 'nxos'
-    ? [...(weak || rw ? [`no ${l.text}`] : []), `snmp-server community ${value} group network-operator`, `snmp-server community ${value} use-ipv4acl ${s.snmpAcl}`]
-    : [...(weak || rw ? [`no ${l.text}`] : []), `snmp-server community ${value} RO ${s.snmpAcl}`]
+    ? [...(weak || rw ? [`no ${oldLine}`] : []), `snmp-server community ${value} group network-operator`, `snmp-server community ${value} use-ipv4acl ${s.snmpAcl}`]
+    : [...(weak || rw ? [`no ${oldLine}`] : []), `snmp-server community ${value} RO ${s.snmpAcl}`]
+  const note = weak
+    ? hasMask
+      ? `Replace ${oldToken} with the existing community (masked on import) and <NEW-LONG-RANDOM-COMMUNITY> with a long random string, or better, move to SNMPv3 authPriv and remove v2c.`
+      : 'Replace <NEW-LONG-RANDOM-COMMUNITY> with a long random string, or better, move to SNMPv3 authPriv and remove v2c.'
+    : hasMask
+      ? `Replace ${oldToken} with the existing community string from the device before pasting (value was masked on import).`
+      : undefined
   return {
     apply: [...(define && c.platform !== 'nxos' ? [aclBlock(s.snmpAcl, s.mgmtNets)] : []), { parents: [], cmds }],
-    rollback: [{ parents: [], cmds: [`no snmp-server community ${value}`, weak ? '! re-enter the old community manually' : l.text] }],
-    note: weak ? 'Replace <NEW-LONG-RANDOM-COMMUNITY> with a long random string, or better, move to SNMPv3 authPriv and remove v2c.' : 'The community value is masked here. Type the real community in place of <masked> when applying.',
+    rollback: [{ parents: [], cmds: [`no snmp-server community ${value}`, weak ? `! re-enter the old ${rw ? 'RW' : 'RO'} community manually (line ${l.n} was masked on import)` : oldLine] }],
+    note,
     order: 1,
   }
 }
@@ -353,7 +399,26 @@ export const RULES: Rule[] = [
   {
     id: 'SNMP-03', title: 'No default or guessable communities', severity: 'critical', category: 'SNMP', ref: 'CIS 1.5 SNMP rules', platforms: ['ios', 'iosxe', 'nxos', 'asa'],
     rationale: '"public", "private" and short dictionary words are the first strings every scanner tries.',
-    check: ({ c, s }) => find(c, /^snmp-server (community|host) .*<masked:weak>/).map(l => ({ target: l.text, line: l.n, detail: 'Default, short or dictionary community string (value masked on import).', fix: l.text.startsWith('snmp-server community') ? snmpFix(c, s, l) : { apply: [{ parents: [], cmds: [`no ${l.text}`, l.text.replace('<masked:weak>', '<NEW-LONG-RANDOM-COMMUNITY>')] }], rollback: [{ parents: [], cmds: ['! re-enter the old trap community manually'] }], order: 1 } })),
+    check: ({ c, s }) => find(c, /^snmp-server (community|host) .*<masked:weak>/).map(l => {
+      if (l.text.startsWith('snmp-server community')) {
+        return { target: l.text, line: l.n, detail: 'Default, short or dictionary community string (value masked on import).', fix: snmpFix(c, s, l) }
+      }
+      const weakHosts = find(c, /^snmp-server host .*<masked(?::weak)?>/)
+      const oldToken = `<OLD-TRAP-COMMUNITY${weakHosts.length > 1 ? `-L${l.n}` : ''}>`
+      const oldLine = l.text.replace(MASK_TOKEN_RE, oldToken)
+      const newLine = l.text.replace(MASK_TOKEN_RE, '<NEW-LONG-RANDOM-COMMUNITY>')
+      return {
+        target: l.text,
+        line: l.n,
+        detail: 'Default, short or dictionary community string (value masked on import).',
+        fix: {
+          apply: [{ parents: [], cmds: [`no ${oldLine}`, newLine] }],
+          rollback: [{ parents: [], cmds: [`no ${newLine}`, `! re-enter the old trap community manually (line ${l.n} was masked on import)`] }],
+          note: `Replace ${oldToken} with the existing trap community (masked on import) and <NEW-LONG-RANDOM-COMMUNITY> with a long random string, or switch traps to SNMPv3 authPriv.`,
+          order: 1,
+        },
+      }
+    }),
   },
   {
     id: 'SNMP-04', title: 'SNMPv3 with authentication and privacy', severity: 'medium', category: 'SNMP', ref: 'CIS 1.5 SNMP rules / STIG SNMPv3', platforms: ['ios', 'iosxe', 'asa'],

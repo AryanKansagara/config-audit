@@ -26,7 +26,16 @@ npm install
 npm run dev      # http://localhost:5173
 npm test         # engine tests
 npm run build
+npm run test:e2e # browser tests (see below)
 ```
+
+### Tests
+
+- `npm test` runs the engine unit tests (`node --test`, no browser).
+- `npm run test:e2e` builds the app and runs the [Playwright](https://playwright.dev) suite in `e2e/` (Chromium) against that production build, served by `vite preview` on port 4417 (set `E2E_PORT` to use another). The first time, install the browser with `npx playwright install chromium` (add `--with-deps` on a fresh Linux machine). If `dist/` is already built, `npx playwright test` skips the rebuild; `npx playwright test -g "waiver"` runs matching tests only.
+- The suite covers the sample fleet (scores, ACL shadowing), remediation and rollback scripts with their downloads, pasted and zipped imports with secret masking checked in the page, downloads and IndexedDB, waivers, persistence across a reload, and bad input (wrong format, empty, truncated). Every test starts with an empty browser profile, signed out; requests to any host other than the preview server are blocked, and uncaught page errors fail the test.
+- `e2e/known-bugs.spec.ts` holds tests for open issues, marked as expected failures until the issue is fixed.
+- GitHub Actions (`.github/workflows/ci.yml`, job `test`) runs install, build, unit tests and the E2E suite on every pull request and on pushes to `main`. Vercel deploys only `main`; pull request branches get no preview (`git.deploymentEnabled` in `vercel.json`).
 
 Copy `.env.example` to `.env` for sync (public Supabase URL and publishable key). Everything works without it.
 

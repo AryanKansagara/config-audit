@@ -40,6 +40,7 @@ end
   await page.getByRole('button', { name: 'Check', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Validation report' })).toBeVisible()
   await page.getByRole('button', { name: 'Import 1 device' }).click()
+  await expect(page).toHaveURL(new RegExp(`/app/p/${id}$`))
   await page.goto(`/app/p/${id}/device/SNMP-CHECK`)
   await page.getByRole('tab', { name: 'Remediation script' }).click()
 

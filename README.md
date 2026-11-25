@@ -15,6 +15,8 @@ Hardening reviews are usually grep plus a spreadsheet. Regex on lines breaks on 
 - **ACL reasoning**: each ACE is a union of 6-D boxes (protocol, source, destination, ports, established); box subtraction finds shadowed and redundant entries, even when several earlier entries cover one together. Also any/any permits, ACLs applied but undefined, unused ACLs and object-groups.
 - **Remediation script** per device in the right parent context, shared ACLs defined once and first, a `reload in` safety net, plus a rollback script. Projected score after the fix.
 - **Secret masking on import**: values are replaced, only the type and whether it is weak are kept.
+  Masking is pattern-based and best effort, so review a config before sharing an export of it. Remediation scripts use fill-in tokens where a masked value is needed.
+- **Truncated configs** are left out of grades until you confirm they are complete.
 - Inventory (interfaces, VLANs, routing), fleet drift, waivers with reason and expiry, snapshots with fixed / new / regressed compare and a config diff, printable report, CSV export.
 - Import: paste, files, zip (Oxidized, RANCID, archive folders), Ansible `ios_facts` JSON, with a validation report by line number.
 - Local-first (IndexedDB). Optional email + password sign-in syncs audits through Supabase.
